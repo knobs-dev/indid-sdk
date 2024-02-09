@@ -1,0 +1,30 @@
+{
+  "name": "indid-monorepo",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "turbo run build",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "watch": "turbo run watch",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "version-packages": "changeset version",
+    "release": "turbo build && changeset publish",
+    "start": "turbo run start"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "workspaces": [
+    "packages/*"
+  ],
+  "devDependencies": {
+    "@changesets/cli": "^2.22.0",
+    "@types/node-fetch": "^2.6.6",
+    "nodemon": "^3.0.1"
+  },
+  "dependencies": {
+    "ethers": "^5.7.2",
+    "turbo": "^1.10.13"
+  }
+}

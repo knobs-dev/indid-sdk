@@ -1,0 +1,39 @@
+{
+  "name": "@knobs-dev/indid-admin-sdk",
+  "version": "0.1.8",
+  "description": "Knobs AA Admin SDK",
+  "types": "./dist/index.d.ts",
+  "main": "./dist/index.js",
+  "author": "knobs",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "ssh://git@github.com/knobs-dev/knobs-account-abstraction-sdk.git",
+    "directory": "packages/indid-admin"
+  },
+  "scripts": {
+    "gen:types": "typechain --target=ethers-v5 --out-dir=src/typechain 'abi/*.json'",
+    "build": "tsc",
+    "watch": "nodemon --watch src --ext js,mjs,cjs,json,ts --ignore 'src/typechain/**' --exec \"yarn build\"",
+    "test": "jest",
+    "lint": "eslint . --ignore-path .eslintignore && tsc --noEmit",
+    "lint:fix": "eslint . --ignore-path .eslintignore --fix",
+    "prettier": "prettier --check --ignore-path .eslintignore '**'",
+    "prettier:fix": "prettier --write --ignore-path .eslintignore '**'",
+    "release": "standard-version && git push --follow-tags && npm publish",
+    "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.1.3"
+  },
+  "dependencies": {
+    "@knobs-dev/indid-core-sdk": "workspace:*",
+    "@knobs-dev/indid-typechains": "workspace:*"
+  }
+}
