@@ -1,21 +1,16 @@
 {
-  "name": "@knobs-dev/indid-core-sdk",
-  "version": "0.1.8",
-  "description": "Knobs AA Core SDK",
+  "name": "@indid/indid-core-sdk",
+  "version": "0.0.0",
+  "description": "Indid AA Core SDK",
   "types": "./dist/index.d.ts",
   "main": "./dist/index.js",
   "author": "knobs",
   "license": "MIT",
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.0.0"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
-  },
-  "repository": {
-    "type": "git",
-    "url": "ssh://git@github.com/knobs-dev/knobs-account-abstraction-sdk.git",
-    "directory": "packages/indid-core"
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist",
@@ -45,7 +40,7 @@
     "typescript": "^5.1.3"
   },
   "dependencies": {
-    "@knobs-dev/indid-typechains": "workspace:*",
+    "@indid/indid-typechains": "workspace:*",
     "@types/elliptic": "^6.4.17",
     "axios": "^1.4.0",
     "elliptic": "^6.5.4",

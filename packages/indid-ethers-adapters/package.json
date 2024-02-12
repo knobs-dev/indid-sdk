@@ -1,7 +1,7 @@
 {
-  "name": "@knobs-dev/indid-ethers-adapters",
-  "version": "0.0.3",
-  "description": "Ethers adapters for indid SDK",
+  "name": "@indid/indid-ethers-adapters",
+  "version": "0.0.0",
+  "description": "Ethers adapters for Indid SDK",
   "types": "./dist/index.d.ts",
   "main": "./dist/index.js",
   "author": "knobs",
@@ -10,12 +10,7 @@
     "node": ">=14.0.0"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
-  },
-  "repository": {
-    "type": "git",
-    "url": "ssh://git@github.com/knobs-dev/knobs-account-abstraction-sdk.git",
-    "directory": "packages/indid-ethers-adapters"
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "build": "tsc",

@@ -12,11 +12,12 @@ import {
   IRecoverAccountResponse,
   TaskUserOperationStatus,
   UserOperationBuilder
-} from "@knobs-dev/indid-core-sdk";
+} from "@indid/indid-core-sdk";
 import {
   EnterpriseModule__factory,
-} from "@knobs-dev/indid-typechains";
+} from "@indid/indid-typechains";
 import { ethers } from "ethers";
+
 
 class AdminClient extends Client {
   private constructor(rpcUrl: string, apiKey: string, opts?: IClientOpts) {

@@ -1,6 +1,6 @@
 ![xxx](assets/logo.png)
 
-## INDID Core SDK ⚒️
+## INDID Admin SDK ⚒️
 
 indid sdk is a TypeScript library for interacting with the Indid modules, deploying and managing [ERC-4337](https://eips.ethereum.org/EIPS/eip-4337) smart accounts, sending user operations.
 
