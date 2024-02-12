@@ -24,7 +24,12 @@ import { UserOperationMiddlewareCtx } from "./context";
 import { EntryPointAddress } from "./constants";
 import { BundlerJsonRpcProvider } from "./provider";
 import { BackendCaller } from "./backendCaller";
-import { solidityKeccak256, solidityPack, arrayify, hexDataSlice, } from "ethers/lib/utils";
+import {
+  solidityKeccak256,
+  solidityPack,
+  arrayify,
+  hexDataSlice,
+} from "ethers/lib/utils";
 import WebSocket from "ws";
 
 import {
@@ -40,7 +45,7 @@ import {
   EntryPoint__factory,
   SimpleAccount__factory,
   UsersModule__factory,
-} from "@knobs-dev/indid-typechains";
+} from "@indid/indid-typechains";
 
 import { ec as EC } from "elliptic";
 import * as crypto from "crypto";
@@ -96,8 +101,9 @@ export class Client {
       .then((network) => ethers.BigNumber.from(network.chainId));
 
     instance.backendCaller.chainId = instance.chainId.toString();
-    instance.backendCaller.backendUrl = opts?.overrideBackendUrl || "https://api.indid.io";
-  
+    instance.backendCaller.backendUrl =
+      opts?.overrideBackendUrl || "https://api.indid.io";
+
     let entryPointAddress = EntryPointAddress[Number(instance.chainId)];
     if (!entryPointAddress) {
       entryPointAddress = EntryPointAddress[137];
@@ -127,7 +133,6 @@ export class Client {
       instance.guardianStructId = response._guardianId;
     }
     instance.moduleType = response.moduleType;
-
   }
 
   public async getCounterfactualAddress(
@@ -135,7 +140,6 @@ export class Client {
     salt: string = "0",
     opts?: ICreateAccountOpts
   ): Promise<IGetCounterfactualAddressResponse> {
- 
     let response = await this.getInitCode(owner, salt, opts);
 
     if (response.error) {
@@ -204,7 +208,6 @@ export class Client {
     calldata: string[],
     opts?: IUserOperationOptions
   ): Promise<IUserOperationBuilder> {
-
     const transactions: ICall[] = [];
     for (let i = 0; i < to.length; i++) {
       transactions.push({
@@ -286,7 +289,11 @@ export class Client {
       )
     ).data!;
 
-    let builder = await this.fillUserOperation(calldataOp, multiCallGasEstimated, opts);
+    let builder = await this.fillUserOperation(
+      calldataOp,
+      multiCallGasEstimated,
+      opts
+    );
 
     return builder;
   }
@@ -315,7 +322,7 @@ export class Client {
       )
     ).data!;
 
-    const deadline = Date.now() + (opts?.deadlineSeconds || 60 * 60);;
+    const deadline = Date.now() + (opts?.deadlineSeconds || 60 * 60);
     let { signature, nonce } = await signEIP712Transaction(
       accountAddress,
       this.moduleAddress,
@@ -526,7 +533,9 @@ export class Client {
         error: "No userOpHash provided",
       };
     }
-    let responseCaller = await this.backendCaller.getTaskFromUserOpHash(userOpHash);
+    let responseCaller = await this.backendCaller.getTaskFromUserOpHash(
+      userOpHash
+    );
     if (responseCaller.error) {
       return {
         receipt: {} as IUserOperationReceipt,
@@ -543,7 +552,6 @@ export class Client {
       receipt: response.receipt as unknown as IUserOperationReceipt,
       error: response.reason,
     };
-
   }
 
   public async waitTask(
@@ -656,10 +664,12 @@ export class Client {
           data: callData,
         });
         console.log("outer gasEstimated", gasEstimated.toString());
-        if (multiCallGasEstimated !== undefined && multiCallGasEstimated.gt(gasEstimated)) {
-        callGasLimit = multiCallGasEstimated;
-        }
-        else {
+        if (
+          multiCallGasEstimated !== undefined &&
+          multiCallGasEstimated.gt(gasEstimated)
+        ) {
+          callGasLimit = multiCallGasEstimated;
+        } else {
           callGasLimit = gasEstimated;
         }
         //GAS: adding a flat 5e5 gas to the callGasLimit because the estimate is not always accurate
@@ -792,9 +802,7 @@ export class Client {
           if (events.length > 0) {
             return events[0];
           }
-          await new Promise((resolve) =>
-            setTimeout(resolve, waitIntervalMs)
-          );
+          await new Promise((resolve) => setTimeout(resolve, waitIntervalMs));
         }
 
         return null;
@@ -802,7 +810,10 @@ export class Client {
     };
   }
 
-  public static verifyWebhookSignature(req: IWebHookSignatureRequest): boolean {
+  public static verifyWebhookSignature(
+    req: IWebHookSignatureRequest,
+    verifyingKey?: string
+  ): boolean {
     const curve = new EC("secp256k1");
 
     const computedMsgBodyHash = crypto
@@ -819,8 +830,11 @@ export class Client {
       return false;
     }
 
+    // Use verifyingKey if it's provided, otherwise use the default key
     const publicKey = curve.keyFromPublic(
-      "041294b0d86c27e213d1678b2fe8c7a4296971c16671004596e59dcf13f9c940995a67a0b928a875dcb615cdc28048ae95e11a516a6caac35f0ef65c328d4d7f60",
+      verifyingKey
+        ? verifyingKey
+        : "041294b0d86c27e213d1678b2fe8c7a4296971c16671004596e59dcf13f9c940995a67a0b928a875dcb615cdc28048ae95e11a516a6caac35f0ef65c328d4d7f60",
       "hex"
     );
     const outcome = publicKey.verify(hash, req.headers.signature);
