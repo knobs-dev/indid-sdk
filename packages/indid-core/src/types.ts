@@ -1,4 +1,4 @@
-import { UserOperationEventEvent } from "@knobs-dev/indid-typechains/dist/EntryPoint";
+import { UserOperationEventEvent } from "@indid/indid-typechains/dist/EntryPoint";
 import { BigNumberish, BytesLike } from "ethers";
 
 export interface IUserOperation {

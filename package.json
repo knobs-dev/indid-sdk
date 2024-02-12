@@ -10,7 +10,9 @@
     "clean": "turbo run clean && rm -rf node_modules",
     "version-packages": "changeset version",
     "release": "turbo build && changeset publish",
-    "start": "turbo run start"
+    "start": "turbo run start",
+    "changeset:version": "changeset version && pnpm install --lockfile-only",
+    "changeset:release": "pnpm build && changeset publish"
   },
   "keywords": [],
   "author": "",

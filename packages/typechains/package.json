@@ -1,7 +1,7 @@
 {
-  "name": "@knobs-dev/indid-typechains",
-  "version": "0.0.10",
-  "description": "Knobs AA Core SDK",
+  "name": "@indid/indid-typechains",
+  "version": "0.0.0",
+  "description": "Typechains for Indid SDK",
   "types": "./dist/index.d.ts",
   "main": "./dist/index.js",
   "repository": "https://github.com/knobs-dev/knobs-account-abstraction-sdk",
@@ -9,7 +9,10 @@
   "license": "MIT",
   "private": false,
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist",
