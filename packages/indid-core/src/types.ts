@@ -287,6 +287,7 @@ export interface ISignUserOperationResponse {
 export interface IUserOperationOptions {
   initCode?: string;
   nonceOP?: BigNumberish;
+  doNotRevertOnTxFailure?: boolean;
   deadlineSeconds?: number;
   callGasLimit?: BigNumberish;
   verificationGasLimit?: BigNumberish

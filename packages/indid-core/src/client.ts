@@ -187,6 +187,31 @@ export class Client {
     return { nonce: await account.getNonce() };
   }
 
+  public async getNonSequentialAccountNonce(
+    accountAddress?: string
+  ): Promise<IGetNonceResponse> {
+    if (accountAddress === undefined) {
+      if (this.accountAddress === "0x") {
+        return {
+          nonce: "",
+          error:
+            "No account address available, provide one or connect a smart contract account first",
+        };
+      }
+      accountAddress = this.accountAddress;
+    }
+
+    const entryPoint = EntryPoint__factory.connect(
+      EntryPointAddress[137],
+      this.provider
+    );
+
+    //generate 192 random bits for the key
+    const key = ethers.utils.hexlify(ethers.utils.randomBytes(24));
+    
+    return { nonce: await entryPoint.getNonce(this.accountAddress, key) };
+  }
+
   public connectAccount(
     signer: ethers.Wallet | ethers.providers.JsonRpcSigner,
     accountAddress: string,
@@ -234,7 +259,9 @@ export class Client {
     }
 
     const calldataMulticall = (
-      await module!.populateTransaction.multiCall(
+      await module!.populateTransaction[
+        opts?.doNotRevertOnTxFailure ? 'multiCallNoRevert' : 'multiCall'
+      ](
         this.accountAddress,
         transactions
       )
@@ -651,7 +678,7 @@ export class Client {
       if (opts?.nonceOP !== undefined) {
         internalNonce = opts.nonceOP;
       } else {
-        internalNonce = await account.getNonce();
+        internalNonce = (await this.getNonSequentialAccountNonce()).nonce;
       }
       builder.setNonce(internalNonce);
       console.log("nonceSDK inside fillUserOperation", internalNonce);

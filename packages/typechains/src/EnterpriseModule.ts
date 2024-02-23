@@ -78,7 +78,9 @@ export declare namespace EnterpriseTransactionManager {
 
 export interface EnterpriseModuleInterface extends utils.Interface {
   functions: {
+    "Error(string)": FunctionFragment;
     "NAME()": FunctionFragment;
+    "Panic(uint256)": FunctionFragment;
     "addGuardian(address,address)": FunctionFragment;
     "addModule(address,address)": FunctionFragment;
     "addToWhitelist(address,address)": FunctionFragment;
@@ -108,6 +110,7 @@ export interface EnterpriseModuleInterface extends utils.Interface {
     "isWhitelisted(address,address)": FunctionFragment;
     "lock(address)": FunctionFragment;
     "multiCall(address,(address,uint256,bytes)[])": FunctionFragment;
+    "multiCallNoRevert(address,(address,uint256,bytes)[])": FunctionFragment;
     "multiCallWithGuardians(address,(address,uint256,bytes)[])": FunctionFragment;
     "multiCallWithGuardiansAndStartSession(address,(address,uint256,bytes)[],address,uint64)": FunctionFragment;
     "multiCallWithSession(address,(address,uint256,bytes)[])": FunctionFragment;
@@ -122,7 +125,9 @@ export interface EnterpriseModuleInterface extends utils.Interface {
 
   getFunction(
     nameOrSignatureOrTopic:
+      | "Error"
       | "NAME"
+      | "Panic"
       | "addGuardian"
       | "addModule"
       | "addToWhitelist"
@@ -152,6 +157,7 @@ export interface EnterpriseModuleInterface extends utils.Interface {
       | "isWhitelisted"
       | "lock"
       | "multiCall"
+      | "multiCallNoRevert"
       | "multiCallWithGuardians"
       | "multiCallWithGuardiansAndStartSession"
       | "multiCallWithSession"
@@ -164,7 +170,9 @@ export interface EnterpriseModuleInterface extends utils.Interface {
       | "upgradeWallet"
   ): FunctionFragment;
 
+  encodeFunctionData(functionFragment: "Error", values: [string]): string;
   encodeFunctionData(functionFragment: "NAME", values?: undefined): string;
+  encodeFunctionData(functionFragment: "Panic", values: [BigNumberish]): string;
   encodeFunctionData(
     functionFragment: "addGuardian",
     values: [string, string]
@@ -264,6 +272,10 @@ export interface EnterpriseModuleInterface extends utils.Interface {
     values: [string, EnterpriseTransactionManager.CallStruct[]]
   ): string;
   encodeFunctionData(
+    functionFragment: "multiCallNoRevert",
+    values: [string, EnterpriseTransactionManager.CallStruct[]]
+  ): string;
+  encodeFunctionData(
     functionFragment: "multiCallWithGuardians",
     values: [string, EnterpriseTransactionManager.CallStruct[]]
   ): string;
@@ -306,7 +318,9 @@ export interface EnterpriseModuleInterface extends utils.Interface {
     values: [string, string]
   ): string;
 
+  decodeFunctionResult(functionFragment: "Error", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "NAME", data: BytesLike): Result;
+  decodeFunctionResult(functionFragment: "Panic", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "addGuardian",
     data: BytesLike
@@ -397,6 +411,10 @@ export interface EnterpriseModuleInterface extends utils.Interface {
   decodeFunctionResult(functionFragment: "lock", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "multiCall", data: BytesLike): Result;
   decodeFunctionResult(
+    functionFragment: "multiCallNoRevert",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "multiCallWithGuardians",
     data: BytesLike
   ): Result;
@@ -443,6 +461,7 @@ export interface EnterpriseModuleInterface extends utils.Interface {
     "GuardianRevokationCancelled(address,address)": EventFragment;
     "GuardianRevokationRequested(address,address,uint256)": EventFragment;
     "GuardianRevoked(address,address)": EventFragment;
+    "InvokeWalletResult(address,bool,uint256,string)": EventFragment;
     "Locked(address,uint64)": EventFragment;
     "ModuleCreated(bytes32)": EventFragment;
     "OwnershipTransfered(address,address)": EventFragment;
@@ -470,6 +489,7 @@ export interface EnterpriseModuleInterface extends utils.Interface {
     nameOrSignatureOrTopic: "GuardianRevokationRequested"
   ): EventFragment;
   getEvent(nameOrSignatureOrTopic: "GuardianRevoked"): EventFragment;
+  getEvent(nameOrSignatureOrTopic: "InvokeWalletResult"): EventFragment;
   getEvent(nameOrSignatureOrTopic: "Locked"): EventFragment;
   getEvent(nameOrSignatureOrTopic: "ModuleCreated"): EventFragment;
   getEvent(nameOrSignatureOrTopic: "OwnershipTransfered"): EventFragment;
@@ -578,6 +598,20 @@ export type GuardianRevokedEvent = TypedEvent<
 >;
 
 export type GuardianRevokedEventFilter = TypedEventFilter<GuardianRevokedEvent>;
+
+export interface InvokeWalletResultEventObject {
+  wallet: string;
+  success: boolean;
+  value: BigNumber;
+  reason: string;
+}
+export type InvokeWalletResultEvent = TypedEvent<
+  [string, boolean, BigNumber, string],
+  InvokeWalletResultEventObject
+>;
+
+export type InvokeWalletResultEventFilter =
+  TypedEventFilter<InvokeWalletResultEvent>;
 
 export interface LockedEventObject {
   wallet: string;
@@ -750,7 +784,11 @@ export interface EnterpriseModule extends BaseContract {
   removeListener: OnEvent<this>;
 
   functions: {
+    Error(text: string, overrides?: CallOverrides): Promise<[string]>;
+
     NAME(overrides?: CallOverrides): Promise<[string]>;
+
+    Panic(code: BigNumberish, overrides?: CallOverrides): Promise<[BigNumber]>;
 
     addGuardian(
       _wallet: string,
@@ -925,6 +963,12 @@ export interface EnterpriseModule extends BaseContract {
       overrides?: Overrides & { from?: string }
     ): Promise<ContractTransaction>;
 
+    multiCallNoRevert(
+      _wallet: string,
+      _transactions: EnterpriseTransactionManager.CallStruct[],
+      overrides?: Overrides & { from?: string }
+    ): Promise<ContractTransaction>;
+
     multiCallWithGuardians(
       _wallet: string,
       _transactions: EnterpriseTransactionManager.CallStruct[],
@@ -985,7 +1029,11 @@ export interface EnterpriseModule extends BaseContract {
     ): Promise<ContractTransaction>;
   };
 
+  Error(text: string, overrides?: CallOverrides): Promise<string>;
+
   NAME(overrides?: CallOverrides): Promise<string>;
+
+  Panic(code: BigNumberish, overrides?: CallOverrides): Promise<BigNumber>;
 
   addGuardian(
     _wallet: string,
@@ -1151,6 +1199,12 @@ export interface EnterpriseModule extends BaseContract {
     overrides?: Overrides & { from?: string }
   ): Promise<ContractTransaction>;
 
+  multiCallNoRevert(
+    _wallet: string,
+    _transactions: EnterpriseTransactionManager.CallStruct[],
+    overrides?: Overrides & { from?: string }
+  ): Promise<ContractTransaction>;
+
   multiCallWithGuardians(
     _wallet: string,
     _transactions: EnterpriseTransactionManager.CallStruct[],
@@ -1211,7 +1265,11 @@ export interface EnterpriseModule extends BaseContract {
   ): Promise<ContractTransaction>;
 
   callStatic: {
+    Error(text: string, overrides?: CallOverrides): Promise<string>;
+
     NAME(overrides?: CallOverrides): Promise<string>;
+
+    Panic(code: BigNumberish, overrides?: CallOverrides): Promise<BigNumber>;
 
     addGuardian(
       _wallet: string,
@@ -1365,6 +1423,12 @@ export interface EnterpriseModule extends BaseContract {
       overrides?: CallOverrides
     ): Promise<string[]>;
 
+    multiCallNoRevert(
+      _wallet: string,
+      _transactions: EnterpriseTransactionManager.CallStruct[],
+      overrides?: CallOverrides
+    ): Promise<string[]>;
+
     multiCallWithGuardians(
       _wallet: string,
       _transactions: EnterpriseTransactionManager.CallStruct[],
@@ -1492,6 +1556,19 @@ export interface EnterpriseModule extends BaseContract {
       guardian?: string | null
     ): GuardianRevokedEventFilter;
 
+    "InvokeWalletResult(address,bool,uint256,string)"(
+      wallet?: string | null,
+      success?: null,
+      value?: null,
+      reason?: null
+    ): InvokeWalletResultEventFilter;
+    InvokeWalletResult(
+      wallet?: string | null,
+      success?: null,
+      value?: null,
+      reason?: null
+    ): InvokeWalletResultEventFilter;
+
     "Locked(address,uint64)"(
       wallet?: string | null,
       releaseAfter?: null
@@ -1608,7 +1685,11 @@ export interface EnterpriseModule extends BaseContract {
   };
 
   estimateGas: {
+    Error(text: string, overrides?: CallOverrides): Promise<BigNumber>;
+
     NAME(overrides?: CallOverrides): Promise<BigNumber>;
+
+    Panic(code: BigNumberish, overrides?: CallOverrides): Promise<BigNumber>;
 
     addGuardian(
       _wallet: string,
@@ -1756,6 +1837,12 @@ export interface EnterpriseModule extends BaseContract {
       overrides?: Overrides & { from?: string }
     ): Promise<BigNumber>;
 
+    multiCallNoRevert(
+      _wallet: string,
+      _transactions: EnterpriseTransactionManager.CallStruct[],
+      overrides?: Overrides & { from?: string }
+    ): Promise<BigNumber>;
+
     multiCallWithGuardians(
       _wallet: string,
       _transactions: EnterpriseTransactionManager.CallStruct[],
@@ -1817,7 +1904,17 @@ export interface EnterpriseModule extends BaseContract {
   };
 
   populateTransaction: {
+    Error(
+      text: string,
+      overrides?: CallOverrides
+    ): Promise<PopulatedTransaction>;
+
     NAME(overrides?: CallOverrides): Promise<PopulatedTransaction>;
+
+    Panic(
+      code: BigNumberish,
+      overrides?: CallOverrides
+    ): Promise<PopulatedTransaction>;
 
     addGuardian(
       _wallet: string,
@@ -1972,6 +2069,12 @@ export interface EnterpriseModule extends BaseContract {
     ): Promise<PopulatedTransaction>;
 
     multiCall(
+      _wallet: string,
+      _transactions: EnterpriseTransactionManager.CallStruct[],
+      overrides?: Overrides & { from?: string }
+    ): Promise<PopulatedTransaction>;
+
+    multiCallNoRevert(
       _wallet: string,
       _transactions: EnterpriseTransactionManager.CallStruct[],
       overrides?: Overrides & { from?: string }
