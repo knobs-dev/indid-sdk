@@ -30,7 +30,7 @@ import {
   arrayify,
   hexDataSlice,
 } from "ethers/lib/utils";
-import WebSocket from "ws";
+import WebSocket from "isomorphic-ws";
 
 import {
   DEFAULT_PRE_VERIFICATION_GAS,
@@ -587,10 +587,8 @@ export class Client {
   ): Promise<IWaitTaskResponse> {
     return new Promise((resolve, reject) => {
       const url = `${this.backendCaller.backendUrl}/ws/task?id=${taskId}`;
-
-      const socket = new WebSocket(url, {
-        headers: { Authorization: this.backendCaller.apiKey },
-      });
+      const socket = new WebSocket(url, [`auth.jwt.${this.backendCaller.apiKey}`
+    ]);
 
       // Set a timeout to close the socket after timeoutMs
       const timeout = setTimeout(() => {
