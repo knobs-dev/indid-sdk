@@ -15,6 +15,8 @@ import {
   IRecoverAccountResponse,
   IUserOperationReceipt,
   IGetTaskFromUserOpHashResponse,
+  ISendMetaTransactionsRequest,
+  ISendMetaTransactionsResponse,
 } from "./types";
 import { BigNumberish } from "ethers";
 
@@ -73,6 +75,43 @@ export class BackendCaller {
     }
 
   
+  }
+
+  public async sendMetaTransactions(
+    data: ISendMetaTransactionsRequest,
+  ): Promise<ISendMetaTransactionsResponse> {
+    const dataWithChainId = {
+      ...data,
+      chainId: this.chainId,
+    };
+    const url = `${this.backendUrl}/send-meta-tx`;
+    let config = {
+      method: "post",
+      body: JSON.stringify(dataWithChainId),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+    };
+
+    try {
+      const response = await fetch(url, config);
+      if (response.status < 200 || response.status >= 300) {
+        const responseText = await response.text();
+        return {
+          taskId: "",
+          error: response.status + responseText,
+        };
+      }
+      return (await response.json()) as ISendMetaTransactionsResponse;
+
+    } catch (error: any) {
+      console.log(error);
+      return {
+        taskId: "",
+        error: `Fetch Error: ${error}`,
+      };
+    }
   }
 
   public async sendUserOp(

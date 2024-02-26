@@ -18,6 +18,8 @@ import {
   IUserOperationOptions,
   IUserOperationReceiptResponse,
   ICall,
+  IMetaTransactionOptions,
+  ISendMetaTransactionsResponse,
 } from "./types";
 import { OpToJSON, signEIP712Transaction } from "./utils";
 import { UserOperationMiddlewareCtx } from "./context";
@@ -208,7 +210,7 @@ export class Client {
 
     //generate 192 random bits for the key
     const key = ethers.utils.hexlify(ethers.utils.randomBytes(24));
-    
+
     return { nonce: await entryPoint.getNonce(this.accountAddress, key) };
   }
 
@@ -225,6 +227,57 @@ export class Client {
       this.moduleType = opts.moduleType;
       this.storageType = opts.storageType;
     }
+  }
+
+  public async sendMetaTransactions(
+    transactions: ICall[],
+    opts?: IMetaTransactionOptions
+  ): Promise<ISendMetaTransactionsResponse> {
+    if (this.signer === undefined) {
+      throw new Error("No signer available, create or connect account first");
+    }
+
+    let module;
+    if (this.moduleType === "enterprise") {
+      module = EnterpriseModule__factory.connect(
+        this.moduleAddress,
+        this.provider
+      );
+    } else if (this.moduleType === "users") {
+      module = UsersModule__factory.connect(this.moduleAddress, this.provider);
+    }
+
+    const calldataMulticall = (
+      await module!.populateTransaction[
+        opts?.doNotRevertOnTxFailure ? "multiCallNoRevert" : "multiCall"
+      ](this.accountAddress, transactions)
+    ).data!;
+
+    const currentTime = Math.round(new Date().getTime() / 1000);
+    const deadline = currentTime + (opts?.deadlineSeconds || 60 * 60);
+
+    let { signature, nonce } = await signEIP712Transaction(
+      this.accountAddress,
+      this.moduleAddress,
+      calldataMulticall,
+      deadline,
+      this.chainId,
+      [this.signer]
+    );
+
+    const response = await this.backendCaller.sendMetaTransactions({
+      accountAddress: this.accountAddress,
+      moduleAddress: this.moduleAddress,
+      data: calldataMulticall,
+      nonce: nonce,
+      deadline: deadline,
+      sigs: signature,
+    });
+
+    return {
+      taskId: response.taskId,
+      error: response.error,
+    };
   }
 
   public async prepareSendTransactions(
@@ -260,11 +313,8 @@ export class Client {
 
     const calldataMulticall = (
       await module!.populateTransaction[
-        opts?.doNotRevertOnTxFailure ? 'multiCallNoRevert' : 'multiCall'
-      ](
-        this.accountAddress,
-        transactions
-      )
+        opts?.doNotRevertOnTxFailure ? "multiCallNoRevert" : "multiCall"
+      ](this.accountAddress, transactions)
     ).data!;
 
     if (opts?.initCode === undefined && opts?.callGasLimit === undefined) {
@@ -587,8 +637,9 @@ export class Client {
   ): Promise<IWaitTaskResponse> {
     return new Promise((resolve, reject) => {
       const url = `${this.backendCaller.backendUrl}/ws/task?id=${taskId}`;
-      const socket = new WebSocket(url, [`auth.jwt.${this.backendCaller.apiKey}`
-    ]);
+      const socket = new WebSocket(url, [
+        `auth.jwt.${this.backendCaller.apiKey}`,
+      ]);
 
       // Set a timeout to close the socket after timeoutMs
       const timeout = setTimeout(() => {

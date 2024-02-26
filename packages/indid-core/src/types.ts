@@ -295,3 +295,22 @@ export interface IUserOperationOptions {
   maxFeePerGas?: BigNumberish;
   maxPriorityFeePerGas?: BigNumberish;
 }
+
+export interface IMetaTransactionOptions {
+  doNotRevertOnTxFailure?: boolean;
+  deadlineSeconds?: number;
+}
+
+export interface ISendMetaTransactionsRequest {
+  accountAddress: string;
+  moduleAddress: string;
+  data: BytesLike;
+  nonce: BigNumberish;
+  deadline: number;
+  sigs: BytesLike;
+}
+
+export interface ISendMetaTransactionsResponse {
+  taskId: string;
+  error?: string;
+}
