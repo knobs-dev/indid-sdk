@@ -45,6 +45,7 @@
     "axios": "^1.4.0",
     "elliptic": "^6.5.4",
     "ethers": "^5.7.2",
+    "isomorphic-ws": "^5.0.0",
     "node-fetch": "^2.7.0",
     "ws": "^8.16.0"
   }

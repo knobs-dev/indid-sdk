@@ -30,7 +30,7 @@ import {
   arrayify,
   hexDataSlice,
 } from "ethers/lib/utils";
-import WebSocket from "ws";
+import WebSocket from "isomorphic-ws";
 
 import {
   DEFAULT_PRE_VERIFICATION_GAS,
@@ -187,6 +187,31 @@ export class Client {
     return { nonce: await account.getNonce() };
   }
 
+  public async getNonSequentialAccountNonce(
+    accountAddress?: string
+  ): Promise<IGetNonceResponse> {
+    if (accountAddress === undefined) {
+      if (this.accountAddress === "0x") {
+        return {
+          nonce: "",
+          error:
+            "No account address available, provide one or connect a smart contract account first",
+        };
+      }
+      accountAddress = this.accountAddress;
+    }
+
+    const entryPoint = EntryPoint__factory.connect(
+      EntryPointAddress[137],
+      this.provider
+    );
+
+    //generate 192 random bits for the key
+    const key = ethers.utils.hexlify(ethers.utils.randomBytes(24));
+    
+    return { nonce: await entryPoint.getNonce(this.accountAddress, key) };
+  }
+
   public connectAccount(
     signer: ethers.Wallet | ethers.providers.JsonRpcSigner,
     accountAddress: string,
@@ -234,7 +259,9 @@ export class Client {
     }
 
     const calldataMulticall = (
-      await module!.populateTransaction.multiCall(
+      await module!.populateTransaction[
+        opts?.doNotRevertOnTxFailure ? 'multiCallNoRevert' : 'multiCall'
+      ](
         this.accountAddress,
         transactions
       )
@@ -560,10 +587,8 @@ export class Client {
   ): Promise<IWaitTaskResponse> {
     return new Promise((resolve, reject) => {
       const url = `${this.backendCaller.backendUrl}/ws/task?id=${taskId}`;
-
-      const socket = new WebSocket(url, {
-        headers: { Authorization: this.backendCaller.apiKey },
-      });
+      const socket = new WebSocket(url, [`auth.jwt.${this.backendCaller.apiKey}`
+    ]);
 
       // Set a timeout to close the socket after timeoutMs
       const timeout = setTimeout(() => {
@@ -651,7 +676,7 @@ export class Client {
       if (opts?.nonceOP !== undefined) {
         internalNonce = opts.nonceOP;
       } else {
-        internalNonce = await account.getNonce();
+        internalNonce = (await this.getNonSequentialAccountNonce()).nonce;
       }
       builder.setNonce(internalNonce);
       console.log("nonceSDK inside fillUserOperation", internalNonce);
