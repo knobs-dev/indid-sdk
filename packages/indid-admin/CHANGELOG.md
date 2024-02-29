@@ -1,5 +1,14 @@
 # @indid/indid-admin-sdk
 
+## 0.0.2
+
+### Patch Changes
+
+- e0d6c52: non sequential nonce
+- Updated dependencies [e0d6c52]
+  - @indid/indid-core-sdk@0.0.2
+  - @indid/indid-typechains@0.0.2
+
 ## 0.0.1
 
 ### Patch Changes
