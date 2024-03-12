@@ -208,7 +208,7 @@ export class Client {
 
     //generate 192 random bits for the key
     const key = ethers.utils.hexlify(ethers.utils.randomBytes(24));
-    
+
     return { nonce: await entryPoint.getNonce(this.accountAddress, key) };
   }
 
@@ -260,11 +260,8 @@ export class Client {
 
     const calldataMulticall = (
       await module!.populateTransaction[
-        opts?.doNotRevertOnTxFailure ? 'multiCallNoRevert' : 'multiCall'
-      ](
-        this.accountAddress,
-        transactions
-      )
+        opts?.doNotRevertOnTxFailure ? "multiCallNoRevert" : "multiCall"
+      ](this.accountAddress, transactions)
     ).data!;
 
     if (opts?.initCode === undefined && opts?.callGasLimit === undefined) {
@@ -586,9 +583,14 @@ export class Client {
     timeoutMs: number = 100000
   ): Promise<IWaitTaskResponse> {
     return new Promise((resolve, reject) => {
-      const url = `${this.backendCaller.backendUrl}/ws/task?id=${taskId}`;
-      const socket = new WebSocket(url, [`auth.jwt.${this.backendCaller.apiKey}`
-    ]);
+      let backendUrl = this.backendCaller.backendUrl;
+      if (backendUrl.startsWith("http") ) {
+        backendUrl = "ws" + backendUrl.slice(4);
+      }
+      const url = `${backendUrl}/ws/task?id=${taskId}`;
+      const socket = new WebSocket(url, [
+        `auth.jwt.${this.backendCaller.apiKey}`,
+      ]);
 
       // Set a timeout to close the socket after timeoutMs
       const timeout = setTimeout(() => {
