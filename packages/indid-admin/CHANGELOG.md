@@ -1,5 +1,13 @@
 # @indid/indid-admin-sdk
 
+## 0.0.3
+
+### Patch Changes
+
+- 8e7088f: fix: websocket url
+- Updated dependencies [8e7088f]
+  - @indid/indid-core-sdk@0.0.3
+
 ## 0.0.2
 
 ### Patch Changes
