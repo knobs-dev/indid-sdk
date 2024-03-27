@@ -11,7 +11,6 @@ import {
   signEIP712Transaction,
   IRecoverAccountResponse,
   TaskUserOperationStatus,
-  UserOperationBuilder
 } from "@indid/indid-core-sdk";
 import {
   EnterpriseModule__factory,
@@ -208,4 +207,5 @@ class AdminClient extends Client {
   }
 }
 
-export { AdminClient, UserOperationBuilder};
+export { AdminClient};
+export * from "@indid/indid-core-sdk";
