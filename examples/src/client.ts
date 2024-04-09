@@ -1,4 +1,4 @@
-import { Client } from "@indid/indid-core-sdk";
+import { Client } from "../../packages/indid-core/dist";
 import dotenv from "dotenv";
 import { ethers } from "ethers";
 
@@ -27,6 +27,7 @@ async function run() {
 
   // connect smart account
   clientUser.connectAccount(wallet, accountAddress);
+
 
   // wait until address has balance greater than 0 - you can send money
   while ((await provider.getBalance(accountAddress)).isZero()) {

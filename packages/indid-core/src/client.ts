@@ -615,7 +615,11 @@ export class Client {
 
         //if task is pending or unhandled, wait
         if (!["PENDING", "UNHANDLED"].includes(operationStatus)) {
-          socket.close(); // Close the socket
+          // Close the socket
+          socket.close();
+          // Clear timeout
+          clearTimeout(timeout);
+          // Resolve the promise
           resolve({
             operationStatus: operationStatus,
             receipt: receipt,
@@ -632,6 +636,7 @@ export class Client {
       socket.onclose = (event) => {
         // Connection was closed
         console.log("WebSocket connection closed: ", event.code, event.reason);
+        
       };
     });
   }
