@@ -1,5 +1,6 @@
 import { UserOperationEventEvent } from "@indid/indid-typechains/dist/EntryPoint";
 import { BigNumberish, BytesLike } from "ethers";
+import { LogLevel } from "./utils";
 
 export interface IUserOperation {
   sender: string;
@@ -81,6 +82,7 @@ export interface IClientOpts {
   entryPoint?: string;
   overrideBundlerRpc?: string;
   overrideBackendUrl?: string;
+  logLevel?: LogLevel
 }
 
 export interface ICreateAccountOpts {
