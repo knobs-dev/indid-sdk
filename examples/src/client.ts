@@ -1,4 +1,4 @@
-import { Client } from "../../packages/indid-core/dist";
+import { Client } from "@indid/indid-core-sdk";
 import dotenv from "dotenv";
 import { ethers } from "ethers";
 
