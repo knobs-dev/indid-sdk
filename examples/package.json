@@ -1,0 +1,25 @@
+{
+  "name": "indid-playground",
+  "version": "0.0.1",
+  "description": "indid usage examples",
+  "main": "index.js",
+  "scripts": {
+    "client": "ts-node src/client.ts",
+    "admin": "ts-node src/admin.ts",
+    "sponsorship": "ts-node src/sponsorship.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.2",
+    "tsup": "^8.0.2",
+    "typescript": "^5.4.3"
+  },
+  "author": "Stefano",
+  "license": "MIT",
+  "dependencies": {
+    "@indid/indid-admin-sdk": "^0.0.3",
+    "@indid/indid-core-sdk": "^0.0.3",
+    "dotenv": "^16.4.5",
+    "ethers": "^5.7.2"
+  }
+}
