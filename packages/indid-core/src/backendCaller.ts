@@ -15,8 +15,8 @@ import {
   IRecoverAccountResponse,
   IUserOperationReceipt,
   IGetTaskFromUserOpHashResponse,
-  ISendMetaTransactionsRequest,
-  ISendMetaTransactionsResponse,
+  ISendDelegatedTransactionsRequest,
+  ISendDelegatedTransactionsResponse,
 } from "./types";
 import { BigNumberish } from "ethers";
 
@@ -77,14 +77,14 @@ export class BackendCaller {
   
   }
 
-  public async sendMetaTransactions(
-    data: ISendMetaTransactionsRequest,
-  ): Promise<ISendMetaTransactionsResponse> {
+  public async sendDelegatedTransactions(
+    data: ISendDelegatedTransactionsRequest,
+  ): Promise<ISendDelegatedTransactionsResponse> {
     const dataWithChainId = {
       ...data,
       chainId: this.chainId,
     };
-    const url = `${this.backendUrl}/send-meta-tx`;
+    const url = `${this.backendUrl}/send-delegated-tx`;
     let config = {
       method: "post",
       body: JSON.stringify(dataWithChainId),
@@ -103,7 +103,7 @@ export class BackendCaller {
           error: response.status + responseText,
         };
       }
-      return (await response.json()) as ISendMetaTransactionsResponse;
+      return (await response.json()) as ISendDelegatedTransactionsResponse;
 
     } catch (error: any) {
       console.log(error);

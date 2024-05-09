@@ -296,12 +296,12 @@ export interface IUserOperationOptions {
   maxPriorityFeePerGas?: BigNumberish;
 }
 
-export interface IMetaTransactionOptions {
+export interface IDelegatedTransactionOptions {
   doNotRevertOnTxFailure?: boolean;
   deadlineSeconds?: number;
 }
 
-export interface ISendMetaTransactionsRequest {
+export interface ISendDelegatedTransactionsRequest {
   accountAddress: string;
   moduleAddress: string;
   data: BytesLike;
@@ -310,7 +310,7 @@ export interface ISendMetaTransactionsRequest {
   sigs: BytesLike;
 }
 
-export interface ISendMetaTransactionsResponse {
+export interface ISendDelegatedTransactionsResponse {
   taskId: string;
   error?: string;
 }

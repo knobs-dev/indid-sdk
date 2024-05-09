@@ -18,8 +18,8 @@ import {
   IUserOperationOptions,
   IUserOperationReceiptResponse,
   ICall,
-  IMetaTransactionOptions,
-  ISendMetaTransactionsResponse,
+  IDelegatedTransactionOptions,
+  ISendDelegatedTransactionsResponse,
 } from "./types";
 import { OpToJSON, signEIP712Transaction } from "./utils";
 import { UserOperationMiddlewareCtx } from "./context";
@@ -229,10 +229,10 @@ export class Client {
     }
   }
 
-  public async sendMetaTransactions(
+  public async sendDelegatedTransactions(
     transactions: ICall[],
-    opts?: IMetaTransactionOptions
-  ): Promise<ISendMetaTransactionsResponse> {
+    opts?: IDelegatedTransactionOptions
+  ): Promise<ISendDelegatedTransactionsResponse> {
     if (this.signer === undefined) {
       throw new Error("No signer available, create or connect account first");
     }
@@ -265,7 +265,33 @@ export class Client {
       [this.signer]
     );
 
-    const response = await this.backendCaller.sendMetaTransactions({
+
+    const executeCalldata = (await module!.populateTransaction.execute(
+      this.accountAddress,
+      calldataMulticall,
+      nonce,
+      deadline,
+      signature
+    )).data!
+
+    //hash executeCalldata
+    const executeCalldataHash = solidityKeccak256(["bytes"], [executeCalldata]);
+
+    console.log("accountAddress", this.accountAddress);
+    console.log("moduleAddress", this.moduleAddress);
+    console.log("calldataMulticall", calldataMulticall);
+    console.log("nonce", nonce);
+    console.log("deadline", deadline);
+    console.log("signature", signature);
+    console.log("executeCalldata", executeCalldata);
+    console.log("executeCalldataHash", executeCalldataHash);
+
+    // return {
+    //   taskId:"",
+    //   error: "",
+    // };
+
+    const response = await this.backendCaller.sendDelegatedTransactions({
       accountAddress: this.accountAddress,
       moduleAddress: this.moduleAddress,
       data: calldataMulticall,
