@@ -33,7 +33,6 @@ import {
   hexDataSlice,
 } from "ethers/lib/utils";
 import WebSocket from "isomorphic-ws";
-import WebSocket from "isomorphic-ws";
 
 import {
   DEFAULT_PRE_VERIFICATION_GAS,
@@ -192,30 +191,6 @@ export class Client {
     return { nonce: await account.getNonce() };
   }
 
-  public async getNonSequentialAccountNonce(
-    accountAddress?: string
-  ): Promise<IGetNonceResponse> {
-    if (accountAddress === undefined) {
-      if (this.accountAddress === "0x") {
-        return {
-          nonce: "",
-          error:
-            "No account address available, provide one or connect a smart contract account first",
-        };
-      }
-      accountAddress = this.accountAddress;
-    }
-
-    const entryPoint = EntryPoint__factory.connect(
-      EntryPointAddress[137],
-      this.provider
-    );
-
-    //generate 192 random bits for the key
-    const key = ethers.utils.hexlify(ethers.utils.randomBytes(24));
-
-    return { nonce: await entryPoint.getNonce(this.accountAddress, key) };
-  }
 
   public async getNonSequentialAccountNonce(
     accountAddress?: string
@@ -289,9 +264,6 @@ export class Client {
     }
 
     const calldataMulticall = (
-      await module!.populateTransaction[
-        opts?.doNotRevertOnTxFailure ? "multiCallNoRevert" : "multiCall"
-      ](this.accountAddress, transactions)
       await module!.populateTransaction[
         opts?.doNotRevertOnTxFailure ? "multiCallNoRevert" : "multiCall"
       ](this.accountAddress, transactions)
