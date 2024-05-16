@@ -11,11 +11,15 @@ import {
   signEIP712Transaction,
   IRecoverAccountResponse,
   TaskUserOperationStatus,
+  IDelegatedTransactionOptions,
+  ISendDelegatedTransactionsResponse,
+  ICall,
 } from "@indid/indid-core-sdk";
 import {
-  EnterpriseModule__factory,
+  EnterpriseModule__factory, UsersModule__factory,
 } from "@indid/indid-typechains";
 import { ethers } from "ethers";
+import { solidityKeccak256 } from "ethers/lib/utils";
 
 
 class AdminClient extends Client {
@@ -110,7 +114,7 @@ class AdminClient extends Client {
     }
 
     const response = await this.createAccount(
-      this.signer!.address,
+      await this.signer!.getAddress(),
       salt,
       webhookData,
       opts
@@ -204,6 +208,69 @@ class AdminClient extends Client {
     }
 
     return { taskId: response.taskId, error: undefined };
+  }
+
+  public async sendDelegatedTransactions(
+    transactions: ICall[],
+    opts?: IDelegatedTransactionOptions
+  ): Promise<ISendDelegatedTransactionsResponse> {
+    if (this.signer === undefined) {
+      throw new Error("No signer available, create or connect account first");
+    }
+
+    let module;
+    if (this.moduleType === "enterprise") {
+      module = EnterpriseModule__factory.connect(
+        this.moduleAddress,
+        this.provider
+      );
+    } else if (this.moduleType === "users") {
+      module = UsersModule__factory.connect(this.moduleAddress, this.provider);
+    }
+
+    const calldataMulticall = (
+      await module!.populateTransaction[
+        opts?.doNotRevertOnTxFailure ? "multiCallNoRevert" : "multiCall"
+      ](this.accountAddress, transactions)
+    ).data!;
+
+    const currentTime = Math.round(new Date().getTime() / 1000);
+    const deadline = currentTime + (opts?.deadlineSeconds || 60 * 60);
+
+    let { signature, nonce } = await signEIP712Transaction(
+      this.accountAddress,
+      this.moduleAddress,
+      calldataMulticall,
+      deadline,
+      this.chainId,
+      [this.signer]
+    );
+
+
+    // const executeCalldata = (await module!.populateTransaction.execute(
+    //   this.accountAddress,
+    //   calldataMulticall,
+    //   nonce,
+    //   deadline,
+    //   signature
+    // )).data!
+
+    //hash executeCalldata
+    // const executeCalldataHash = solidityKeccak256(["bytes"], [executeCalldata]);
+
+    const response = await this.backendCaller.sendDelegatedTransactions({
+      accountAddress: this.accountAddress,
+      moduleAddress: this.moduleAddress,
+      data: calldataMulticall,
+      nonce: nonce,
+      deadline: deadline,
+      sigs: signature,
+    });
+
+    return {
+      taskId: response.taskId,
+      error: response.error,
+    };
   }
 }
 
