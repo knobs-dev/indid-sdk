@@ -19,6 +19,7 @@ import {
   ISendDelegatedTransactionsResponse,
 } from "./types";
 import { BigNumberish } from "ethers";
+import { Logger } from "./utils";
 
 export class BackendCaller {
   public backendUrl: string;
@@ -61,7 +62,7 @@ export class BackendCaller {
       }
       return (await response.json()) as IRetrieveSdkDefaultsResponse;
     } catch (error) {
-      console.log(error);
+      Logger.getInstance().error(error);
       return {
         factoryAddress: "",
         _module: "",
@@ -144,7 +145,7 @@ export class BackendCaller {
       return (await response.json()) as ISendUserOpResponse;
 
     } catch (error: any) {
-      console.log(error);
+      Logger.getInstance().error(error);
       return {
         userOpHash: "",
         taskId: "",
@@ -182,7 +183,7 @@ export class BackendCaller {
       }
       if (response.status < 200 || response.status >= 300) {
         const responseText = await response.text();
-        console.log("response status: ", response.status);
+        Logger.getInstance().debug("response status: ", response.status);
         return {
           paymasterAndData: "",
           error: responseText,
@@ -190,7 +191,7 @@ export class BackendCaller {
       }
 
     } catch (error) {
-      console.log("inside signPaymasterOp fetch error:", error);
+      Logger.getInstance().error("inside signPaymasterOp fetch error:", error);
       return { paymasterAndData: "", error: `Fetch Error: ${error}` };
     }
     
@@ -214,14 +215,14 @@ export class BackendCaller {
     try {
       const response = await fetch(url, config);
       if (response.status === 214 || response.status === 504) {
-        console.log("Waiting for user op receipt")
+        Logger.getInstance().debug("Waiting for user op receipt")
         return null;
       }
    
       else if (response.status < 200 || response.status >= 300) {
         const responseText = await response.text();
-        console.log("backend caller response getopstatus status: ", response.status);
-        console.log("backend caller response getopstatus text: ", responseText);
+        Logger.getInstance().debug("backend caller response getopstatus status: ", response.status);
+        Logger.getInstance().debug("backend caller response getopstatus text: ", responseText);
         return {
           receipt: {} as IUserOperationReceipt,
           error: responseText,
@@ -245,7 +246,7 @@ export class BackendCaller {
         };
       }
     } catch (error) {
-      console.log(error);
+      Logger.getInstance().error(error);
       return { receipt: {} as IUserOperationReceipt, error: `Fetch Error: ${error}` };
     }
   }
@@ -269,7 +270,7 @@ export class BackendCaller {
       }
       return { status: response.status, data: await response.json() };
     } catch (error) {
-      console.log(error);
+      Logger.getInstance().error(error);
     }
   }
 
@@ -288,8 +289,8 @@ export class BackendCaller {
       const response = await fetch(url, config);
       if (response.status < 200 || response.status >= 300) {
         const responseText = await response.text();
-        console.log("response status: ", response.status);
-        console.log("backend caller response text: ", responseText);
+        Logger.getInstance().debug("response status: ", response.status);
+        Logger.getInstance().debug("backend caller response text: ", responseText);
         return {
           taskId: "",
           error: responseText,
@@ -298,7 +299,7 @@ export class BackendCaller {
       const responseFetch = await response.json();
       return responseFetch as IGetTaskFromUserOpHashResponse;
     } catch (error) {
-      console.log(error);
+      Logger.getInstance().error(error);
       return { taskId: "", error: `Fetch Error: ${error}` };
     }
   }
@@ -322,12 +323,12 @@ export class BackendCaller {
       const response = await fetch(url, config);
       if (response.status < 200 || response.status >= 300) {
         const responseText = await response.text();
-        console.log("backend caller response text: ", responseText);
+        Logger.getInstance().debug("backend caller response text: ", responseText);
         return { initCode: "", error: responseText };
       }
       return (await response.json()) as IInitCodeResponse;
     } catch (error) {
-      console.log(error);
+      Logger.getInstance().error(error);
       return { initCode: "", error: `Fetch Error: ${error}` };
     }
   }
@@ -358,7 +359,7 @@ export class BackendCaller {
       }
       return (await response.json()) as ICreateAccountResponse;
     } catch (error) {
-      console.log(error);
+      Logger.getInstance().error(error);
       return { accountAddress: "", taskId: "", error: `Fetch Error: ${error}` };
     }
     
@@ -390,7 +391,7 @@ export class BackendCaller {
       }
       return (await response.json()) as IRecoverAccountResponse;
     } catch (error) {
-      console.log(error);
+      Logger.getInstance().error(error);
       return { taskId: "", error: `Fetch Error: ${error}` };
     }
     

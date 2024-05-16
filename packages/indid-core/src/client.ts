@@ -21,7 +21,7 @@ import {
   IDelegatedTransactionOptions,
   ISendDelegatedTransactionsResponse,
 } from "./types";
-import { OpToJSON, signEIP712Transaction } from "./utils";
+import { LogLevel, Logger, OpToJSON, signEIP712Transaction } from "./utils";
 import { UserOperationMiddlewareCtx } from "./context";
 import { EntryPointAddress } from "./constants";
 import { BundlerJsonRpcProvider } from "./provider";
@@ -32,6 +32,7 @@ import {
   arrayify,
   hexDataSlice,
 } from "ethers/lib/utils";
+import WebSocket from "isomorphic-ws";
 import WebSocket from "isomorphic-ws";
 
 import {
@@ -74,6 +75,8 @@ export class Client {
       // "http://localhost:3000/rpc"
     );
 
+    Logger.getInstance().setLogLevel(opts?.logLevel || LogLevel.NONE);
+
     this.backendCaller = new BackendCaller(
       opts?.overrideBackendUrl || "https://api.indid.io",
       apiKey
@@ -111,7 +114,7 @@ export class Client {
       entryPointAddress = EntryPointAddress[137];
     }
 
-    console.log(`Backend url: ${instance.backendCaller.backendUrl}`);
+    Logger.getInstance().debug(`Backend url: ${instance.backendCaller.backendUrl}`);
 
     instance.entryPoint = EntryPoint__factory.connect(
       opts?.entryPoint || entryPointAddress,
@@ -214,6 +217,31 @@ export class Client {
     return { nonce: await entryPoint.getNonce(this.accountAddress, key) };
   }
 
+  public async getNonSequentialAccountNonce(
+    accountAddress?: string
+  ): Promise<IGetNonceResponse> {
+    if (accountAddress === undefined) {
+      if (this.accountAddress === "0x") {
+        return {
+          nonce: "",
+          error:
+            "No account address available, provide one or connect a smart contract account first",
+        };
+      }
+      accountAddress = this.accountAddress;
+    }
+
+    const entryPoint = EntryPoint__factory.connect(
+      EntryPointAddress[137],
+      this.provider
+    );
+
+    //generate 192 random bits for the key
+    const key = ethers.utils.hexlify(ethers.utils.randomBytes(24));
+
+    return { nonce: await entryPoint.getNonce(this.accountAddress, key) };
+  }
+
   public connectAccount(
     signer: ethers.Wallet | ethers.providers.JsonRpcSigner,
     accountAddress: string,
@@ -264,6 +292,9 @@ export class Client {
       await module!.populateTransaction[
         opts?.doNotRevertOnTxFailure ? "multiCallNoRevert" : "multiCall"
       ](this.accountAddress, transactions)
+      await module!.populateTransaction[
+        opts?.doNotRevertOnTxFailure ? "multiCallNoRevert" : "multiCall"
+      ](this.accountAddress, transactions)
     ).data!;
 
     if (opts?.initCode === undefined && opts?.callGasLimit === undefined) {
@@ -277,14 +308,14 @@ export class Client {
         });
 
         totalGasEstimated = totalGasEstimated.add(gasEstimated);
-        console.log(
+        Logger.getInstance().debug(
           "inner transaction gasEstimated for tx: ",
           i,
           gasEstimated.toString()
         );
       }
 
-      console.log(
+      Logger.getInstance().debug(
         "total inner transactions estimated gas:",
         totalGasEstimated.toString()
       );
@@ -295,7 +326,7 @@ export class Client {
         data: calldataMulticall,
       });
 
-      console.log(
+      Logger.getInstance().debug(
         "multicall transaction gasEstimated",
         multiCallGasEstimated.toString()
       );
@@ -585,7 +616,11 @@ export class Client {
     timeoutMs: number = 100000
   ): Promise<IWaitTaskResponse> {
     return new Promise((resolve, reject) => {
-      const url = `${this.backendCaller.backendUrl}/ws/task?id=${taskId}`;
+      let backendUrl = this.backendCaller.backendUrl;
+      if (backendUrl.startsWith("http") ) {
+        backendUrl = "ws" + backendUrl.slice(4);
+      }
+      const url = `${backendUrl}/ws/task?id=${taskId}`;
       const socket = new WebSocket(url, [
         `auth.jwt.${this.backendCaller.apiKey}`,
       ]);
@@ -598,13 +633,13 @@ export class Client {
 
       socket.onopen = () => {
         // Connection opened
-        console.log("WebSocket connection opened");
+        Logger.getInstance().debug("WebSocket connection opened");
       };
 
       socket.onmessage = (event) => {
         const res = JSON.parse(event.data as string) as IWaitTaskResponse;
 
-        console.log("🚀 task result from websocket:", res.operationStatus);
+        Logger.getInstance().debug("🚀 task result from websocket:", res.operationStatus);
         if (res === undefined || res == null) {
           reject({ error: "No response from server" });
         }
@@ -613,7 +648,11 @@ export class Client {
 
         //if task is pending or unhandled, wait
         if (!["PENDING", "UNHANDLED"].includes(operationStatus)) {
-          socket.close(); // Close the socket
+          // Close the socket
+          socket.close();
+          // Clear timeout
+          clearTimeout(timeout);
+          // Resolve the promise
           resolve({
             operationStatus: operationStatus,
             receipt: receipt,
@@ -624,12 +663,12 @@ export class Client {
 
       socket.onerror = (error) => {
         // An error occurred
-        console.log("WebSocket error: ", error);
+        Logger.getInstance().error("WebSocket error: ", error);
       };
 
       socket.onclose = (event) => {
         // Connection was closed
-        console.log("WebSocket connection closed: ", event.code, event.reason);
+        Logger.getInstance().debug("WebSocket connection closed: ", event.code, event.reason);
       };
     });
   }
@@ -679,7 +718,7 @@ export class Client {
         internalNonce = (await this.getNonSequentialAccountNonce()).nonce;
       }
       builder.setNonce(internalNonce);
-      console.log("nonceSDK inside fillUserOperation", internalNonce);
+      Logger.getInstance().debug("nonceSDK inside fillUserOperation", internalNonce);
 
       verificationGasLimit = DEFAULT_VERIFICATION_GAS_LIMIT;
       if (opts?.callGasLimit === undefined) {
@@ -688,7 +727,7 @@ export class Client {
           to: this.accountAddress,
           data: callData,
         });
-        console.log("outer gasEstimated", gasEstimated.toString());
+        Logger.getInstance().debug("outer gasEstimated", gasEstimated.toString());
         if (
           multiCallGasEstimated !== undefined &&
           multiCallGasEstimated.gt(gasEstimated)
@@ -733,13 +772,12 @@ export class Client {
 
     if (builder.getMaxFeePerGas() == ethers.constants.Zero) {
       const block = await this.provider.getBlock("latest");
-      console.log("block", block);
-      console.log(
+      Logger.getInstance().debug(
         "block.baseFeePerGas",
         Number(block.baseFeePerGas!.toString())
       );
 
-      console.log("maxPriorityFeePerGas", builder.getMaxPriorityFeePerGas());
+      Logger.getInstance().debug("maxPriorityFeePerGas", builder.getMaxPriorityFeePerGas());
       builder.setMaxFeePerGas(
         block.baseFeePerGas!.add(builder.getMaxPriorityFeePerGas())
       );
@@ -850,7 +888,7 @@ export class Client {
 
     // Checking if the computed hash matches the one in the headers
     if (computedMsgBodyHash != hash) {
-      console.log("Computed hash does not match the hash in the headers");
+      Logger.getInstance().debug("Computed hash does not match the hash in the headers");
 
       return false;
     }
@@ -866,7 +904,7 @@ export class Client {
 
     // If the signature is not valid, return invalid signature
     if (!outcome) {
-      console.log("Invalid signature");
+      Logger.getInstance().warn("Invalid signature");
     }
 
     return outcome;

@@ -14,6 +14,9 @@ import {
   IDelegatedTransactionOptions,
   ISendDelegatedTransactionsResponse,
   ICall,
+  UserOperationBuilder,
+  Logger,
+  LogLevel
 } from "@indid/indid-core-sdk";
 import {
   EnterpriseModule__factory, UsersModule__factory,
@@ -29,6 +32,7 @@ class AdminClient extends Client {
 
   public static async init(rpcUrl: string, apiKey: string, opts?: IClientOpts) {
     const instance = new AdminClient(rpcUrl, apiKey, opts);
+    Logger.getInstance().setLogLevel(opts?.logLevel || LogLevel.NONE);
     await this.initialize(instance, opts);
     return instance;
   }
@@ -175,7 +179,7 @@ class AdminClient extends Client {
       this.provider
     );
 
-    console.log(
+    Logger.getInstance().debug(
       "account guardians",
       await moduleK.getGuardians(accountAddress)
     );

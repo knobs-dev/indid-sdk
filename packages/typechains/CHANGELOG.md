@@ -1,5 +1,11 @@
 # @indid/indid-typechains
 
+## 0.0.2
+
+### Patch Changes
+
+- e0d6c52: non sequential nonce
+
 ## 0.0.1
 
 ### Patch Changes

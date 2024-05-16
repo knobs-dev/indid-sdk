@@ -1,4 +1,4 @@
-![xxx](assets/logo.png)
+![(indid.png)](https://raw.githubusercontent.com/knobs-dev/indid-sdk/main/assets/logo.png)
 
 ## INDID Core SDK ⚒️
 
