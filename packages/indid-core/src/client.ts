@@ -113,6 +113,7 @@ export class Client {
       entryPointAddress = EntryPointAddress[137];
     }
 
+    Logger.getInstance().setLogLevel(opts?.logLevel || LogLevel.NONE);
     Logger.getInstance().debug(`Backend url: ${instance.backendCaller.backendUrl}`);
 
     instance.entryPoint = EntryPoint__factory.connect(
