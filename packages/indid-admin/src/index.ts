@@ -14,7 +14,6 @@ import {
   IDelegatedTransactionOptions,
   ISendDelegatedTransactionsResponse,
   ICall,
-  UserOperationBuilder,
   Logger,
   LogLevel
 } from "@indid/indid-core-sdk";
@@ -22,7 +21,6 @@ import {
   EnterpriseModule__factory, UsersModule__factory,
 } from "@indid/indid-typechains";
 import { ethers } from "ethers";
-import { solidityKeccak256 } from "ethers/lib/utils";
 
 
 class AdminClient extends Client {

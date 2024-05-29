@@ -122,6 +122,7 @@ export class BackendCaller {
       ...data,
       chainId: this.chainId,
     };
+    Logger.getInstance().debug(`data sent via sendUserOp: ${JSON.stringify(dataWithChainId)}`);
     const url = `${this.backendUrl}/send-op`;
     let config = {
       method: "post",

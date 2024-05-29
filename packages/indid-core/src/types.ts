@@ -82,6 +82,7 @@ export interface IClientOpts {
   entryPoint?: string;
   overrideBundlerRpc?: string;
   overrideBackendUrl?: string;
+  overrideEntryPoint?: string;
   logLevel?: LogLevel
 }
 

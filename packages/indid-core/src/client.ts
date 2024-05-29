@@ -18,8 +18,6 @@ import {
   IUserOperationOptions,
   IUserOperationReceiptResponse,
   ICall,
-  IDelegatedTransactionOptions,
-  ISendDelegatedTransactionsResponse,
 } from "./types";
 import { LogLevel, Logger, OpToJSON, signEIP712Transaction } from "./utils";
 import { UserOperationMiddlewareCtx } from "./context";
@@ -56,6 +54,7 @@ export class Client {
   public provider: BundlerJsonRpcProvider;
   public backendCaller: BackendCaller;
   public signer?: ethers.providers.JsonRpcSigner | ethers.Wallet | any;
+  public entryPointAddress: string;
   public accountAddress: string;
   public moduleAddress: string;
   public factoryAddress: string;
@@ -80,7 +79,8 @@ export class Client {
       opts?.overrideBackendUrl || "https://api.indid.io",
       apiKey
     );
-
+    
+    this.entryPointAddress = "0x";
     this.accountAddress = "0x";
     this.moduleAddress = "0x";
     this.factoryAddress = "0x";
@@ -108,16 +108,16 @@ export class Client {
     instance.backendCaller.backendUrl =
       opts?.overrideBackendUrl || "https://api.indid.io";
 
-    let entryPointAddress = EntryPointAddress[Number(instance.chainId)];
-    if (!entryPointAddress) {
-      entryPointAddress = EntryPointAddress[137];
-    }
+    //  This line of code is setting entryPointAddress based on the first truthy value found among the following, in order:
+    instance.entryPointAddress = opts?.overrideEntryPoint || EntryPointAddress[Number(instance.chainId)] || EntryPointAddress[137];
+
 
     Logger.getInstance().setLogLevel(opts?.logLevel || LogLevel.NONE);
+    Logger.getInstance().debug(`EntryPointAddress: ${instance.entryPointAddress}`);
     Logger.getInstance().debug(`Backend url: ${instance.backendCaller.backendUrl}`);
 
     instance.entryPoint = EntryPoint__factory.connect(
-      opts?.entryPoint || entryPointAddress,
+      instance.entryPointAddress,
       instance.provider
     );
 
