@@ -100,6 +100,7 @@ export interface IConnectAccountOpts {
   moduleType: string;
   moduleAddress: string;
   storageType: string;
+  factoryAddress: string;
 }
 
 export interface ISendUserOperationOpts {
@@ -224,6 +225,26 @@ export interface IRetrieveSdkDefaultsResponse {
   _guardiansHash: string;
   _guardianId: string;
   storageType: string;
+  error?: string;
+}
+
+export interface IGetAccountInfoRequest {
+  accountAddress: string;
+}
+
+export interface IGetAccountInfoResponse {
+  factoryAddress: string;
+  moduleAddress: string;
+  storageType: string;
+  moduleType: string;
+  initCode: string;
+  guardians?: string[];
+  guardiansHash?: string;
+  guardianStructId?: string;
+  error?: string;
+}
+
+export interface IConnectAccountResponse {
   error?: string;
 }
 

@@ -17,6 +17,8 @@ import {
   IGetTaskFromUserOpHashResponse,
   ISendDelegatedTransactionsRequest,
   ISendDelegatedTransactionsResponse,
+  IGetAccountInfoResponse,
+  IGetAccountInfoRequest,
 } from "./types";
 import { BigNumberish } from "ethers";
 import { Logger } from "./utils";
@@ -74,8 +76,49 @@ export class BackendCaller {
         error: `Fetch Error: ${error}`,
       };
     }
+  }
 
-  
+
+  public async getAccountInfo(data: IGetAccountInfoRequest): Promise<IGetAccountInfoResponse> {
+    const dataWithChainId = {
+      ...data,
+      chainId: this.chainId,
+    };
+    const url = `${this.backendUrl}/get-account-info`;
+    let config = {
+      method: "post",
+      body: JSON.stringify(dataWithChainId),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+    };
+
+    try {
+      const response = await fetch(url, config);
+      if (response.status < 200 || response.status >= 300) {
+        const responseText = await response.text();
+        return {
+          factoryAddress: "",
+          moduleAddress: "",
+          moduleType: "",
+          storageType: "",
+          initCode: "",
+          error: responseText,
+        };
+      }
+      return (await response.json()) as IGetAccountInfoResponse;
+    } catch (error) {
+      Logger.getInstance().error(error);
+      return {
+        factoryAddress: "",
+        moduleAddress: "",
+        moduleType: "",
+        storageType: "",
+        initCode: "",
+        error: `Fetch Error: ${error}`,
+      };
+    }
   }
 
   public async sendDelegatedTransactions(
@@ -155,7 +198,7 @@ export class BackendCaller {
     }
   }
 
- 
+
   public async signPaymasterOp(
     data: IUserOperation
   ): Promise<IUserOpSponsorshipResponse> {
@@ -195,14 +238,14 @@ export class BackendCaller {
       Logger.getInstance().error("inside signPaymasterOp fetch error:", error);
       return { paymasterAndData: "", error: `Fetch Error: ${error}` };
     }
-    
+
     return (await response!.json()) as IUserOpSponsorshipResponse;
   }
 
   public async getOpStatus(opHash: string): Promise<IOpStatusResponse | null> {
     const url =
       `${this.backendUrl}/op-status?` + new URLSearchParams({ opHash: opHash, chainId: Number(this.chainId).toString() });
-      // `${this.backendUrl}/op-status?` + new URLSearchParams({ opHash: opHash});
+    // `${this.backendUrl}/op-status?` + new URLSearchParams({ opHash: opHash});
     let config = {
       method: "get",
       maxBodyLength: Infinity,
@@ -219,7 +262,7 @@ export class BackendCaller {
         Logger.getInstance().debug("Waiting for user op receipt")
         return null;
       }
-   
+
       else if (response.status < 200 || response.status >= 300) {
         const responseText = await response.text();
         Logger.getInstance().debug("backend caller response getopstatus status: ", response.status);
@@ -238,7 +281,7 @@ export class BackendCaller {
           };
         }
         return { receipt: jsonResponse.receipt as IUserOperationReceipt, error: jsonResponse.reason };
-          
+
       }
       else {
         return {
@@ -275,7 +318,7 @@ export class BackendCaller {
     }
   }
 
-  public async getTaskFromUserOpHash(opHash: string) : Promise<IGetTaskFromUserOpHashResponse>{
+  public async getTaskFromUserOpHash(opHash: string): Promise<IGetTaskFromUserOpHashResponse> {
     const url = `${this.backendUrl}/task-by-userop/${opHash}`;
     let config = {
       method: "get",
@@ -363,7 +406,7 @@ export class BackendCaller {
       Logger.getInstance().error(error);
       return { accountAddress: "", taskId: "", error: `Fetch Error: ${error}` };
     }
-    
+
   }
 
   public async backendRecoverAccount(
@@ -395,6 +438,6 @@ export class BackendCaller {
       Logger.getInstance().error(error);
       return { taskId: "", error: `Fetch Error: ${error}` };
     }
-    
+
   }
 }

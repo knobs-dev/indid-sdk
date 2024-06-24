@@ -166,12 +166,9 @@ class AdminClient extends Client {
   public async recoverEnterpriseAccount(
     accountAddress: string,
     newOwner: string,
+    guardianSigner: ethers.Wallet | ethers.providers.JsonRpcSigner,
     webhookData?: IWebHookRequest
   ): Promise<IRecoverAccountResponse> {
-    if(this.signer === undefined){
-      return { taskId: "", error: "No signer provided" };
-    }
-
     const moduleK = EnterpriseModule__factory.connect(
       this.moduleAddress,
       this.provider
@@ -193,7 +190,7 @@ class AdminClient extends Client {
       calldata,
       deadline,
       this.chainId,
-      [this.signer]
+      [guardianSigner as ethers.Wallet]
     );
 
     const response = await this.backendCaller.backendRecoverAccount({

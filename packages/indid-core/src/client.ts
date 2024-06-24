@@ -18,6 +18,8 @@ import {
   IUserOperationOptions,
   IUserOperationReceiptResponse,
   ICall,
+  IConnectAccountResponse,
+  IInitCodeRequest,
 } from "./types";
 import { LogLevel, Logger, OpToJSON, signEIP712Transaction } from "./utils";
 import { UserOperationMiddlewareCtx } from "./context";
@@ -79,7 +81,7 @@ export class Client {
       opts?.overrideBackendUrl || "https://api.indid.io",
       apiKey
     );
-    
+
     this.entryPointAddress = "0x";
     this.accountAddress = "0x";
     this.moduleAddress = "0x";
@@ -218,11 +220,11 @@ export class Client {
     return { nonce: await entryPoint.getNonce(this.accountAddress, key) };
   }
 
-  public connectAccount(
+  public async connectAccount(
     signer: ethers.Wallet | ethers.providers.JsonRpcSigner,
     accountAddress: string,
     opts?: IConnectAccountOpts
-  ): void {
+  ): Promise<IConnectAccountResponse> {
     this.signer = signer;
     this.accountAddress = accountAddress;
 
@@ -230,6 +232,26 @@ export class Client {
       this.moduleAddress = opts.moduleAddress;
       this.moduleType = opts.moduleType;
       this.storageType = opts.storageType;
+      this.factoryAddress = opts.factoryAddress;
+      //FIXME: factoryAddress is only useful is the account is a counterfactual
+      // this.guardians = opts.guardians;
+      // this.guardiansHash = opts.guardiansHash;
+      // this.guardianStructId = opts.guardianStructId;
+      return {};
+    }
+    else {
+      const response = await this.backendCaller.getAccountInfo({ accountAddress });
+      this.moduleAddress = response.moduleAddress;
+      this.moduleType = response.moduleType;
+      this.storageType = response.storageType;
+      this.factoryAddress = response.factoryAddress;
+      // this.guardians = response.guardians;
+      // this.guardiansHash = response.guardiansHash;
+      // this.guardianStructId = response.guardianStructId;
+
+      return {
+        error: response.error,
+      };
     }
   }
 
@@ -248,6 +270,8 @@ export class Client {
       });
     }
 
+   
+
     const account = SimpleAccount__factory.connect(
       this.accountAddress,
       this.provider
@@ -262,6 +286,10 @@ export class Client {
       );
     } else if (this.moduleType === "users") {
       module = UsersModule__factory.connect(this.moduleAddress, this.provider);
+    }
+
+    else {
+      throw new Error("Invalid module type");
     }
 
     const calldataMulticall = (
@@ -404,11 +432,20 @@ export class Client {
     return builder;
   }
 
-  async getInitCode(
+  public async getInitCode(
     owner?: string,
     salt: string = "0",
     opts?: ICreateAccountOpts
   ): Promise<IInitCodeResponse> {
+    //TODO: test this flow
+    if (this.accountAddress !== "0x") {
+
+      const response = await this.backendCaller.getAccountInfo({ accountAddress: this.accountAddress })
+
+      return { initCode: response.initCode, error: response.error };
+    }
+
+
     if (owner === undefined) {
       if (this.signer === undefined) {
         return {
@@ -430,12 +467,15 @@ export class Client {
     let config = { ...opts };
 
     if (opts == null) {
+
       config.factoryAddress = this.factoryAddress;
       config.moduleAddress = this.moduleAddress;
       config.guardians = this.guardians;
       config.moduleType = this.moduleType;
       config.storageType = this.storageType;
     }
+
+    let requestData: IInitCodeRequest;
 
     if (config.storageType === "standard") {
       if (opts != null) {
@@ -459,16 +499,15 @@ export class Client {
       } else {
         config.guardiansHash = this.guardiansHash;
       }
-      const response = await this.backendCaller.retrieveInitCode({
+      requestData = {
         owner: owner!,
         factoryAddress: config.factoryAddress,
         guardiansHash: config.guardiansHash,
         moduleAddress: config.moduleAddress,
         salt: salt,
         chainId: this.chainId,
-      });
+      };
 
-      return { initCode: response.initCode, error: response.error };
     } else if (this.storageType === "shared") {
       if (opts != null) {
         if (opts.guardianStructId === undefined) {
@@ -478,19 +517,22 @@ export class Client {
       } else {
         config.guardianStructId = this.guardianStructId;
       }
-      const response = await this.backendCaller.retrieveInitCode({
+      requestData = {
         owner: owner!,
         factoryAddress: config.factoryAddress,
         guardianId: config.guardianStructId,
         moduleAddress: config.moduleAddress,
         salt: salt,
         chainId: this.chainId,
-      });
+      };
 
-      return { initCode: response.initCode, error: response.error };
     } else {
       return { initCode: "", error: "Invalid storage type" };
     }
+    //TODO: if the owner/salt combo already exist in the db all other request data is ignored by the backend
+    const response = await this.backendCaller.retrieveInitCode(requestData);
+    return { initCode: response.initCode, error: response.error };
+
   }
 
   public async sendUserOperation(
@@ -528,7 +570,7 @@ export class Client {
     return builder;
   }
 
-  async prepareSendERC20(
+  public async prepareSendERC20(
     contractAddress: string,
     recipientAddress: string,
     amount: BigNumberish,
@@ -553,7 +595,7 @@ export class Client {
     return builder;
   }
 
-  async waitOP(
+  public async waitOP(
     userOpHash: string,
     timeoutMs: number = 100000
   ): Promise<IUserOperationReceiptResponse> {
@@ -590,7 +632,7 @@ export class Client {
   ): Promise<IWaitTaskResponse> {
     return new Promise((resolve, reject) => {
       let backendUrl = this.backendCaller.backendUrl;
-      if (backendUrl.startsWith("http") ) {
+      if (backendUrl.startsWith("http")) {
         backendUrl = "ws" + backendUrl.slice(4);
       }
       const url = `${backendUrl}/ws/task?id=${taskId}`;
@@ -759,7 +801,7 @@ export class Client {
     return builder;
   }
 
-  async getUserOperationHash(
+  public async getUserOperationHash(
     builder: IUserOperationBuilder
   ): Promise<IGetUserOperationHashResponse> {
     const op = builder.getOp();
@@ -811,14 +853,14 @@ export class Client {
 
     const userOpHash = dryRun
       ? new UserOperationMiddlewareCtx(
-          op,
-          this.entryPoint.address,
-          this.chainId
-        ).getUserOpHash()
+        op,
+        this.entryPoint.address,
+        this.chainId
+      ).getUserOpHash()
       : ((await this.provider.send("eth_sendUserOperation", [
-          OpToJSON(op),
-          this.entryPoint.address,
-        ])) as string);
+        OpToJSON(op),
+        this.entryPoint.address,
+      ])) as string);
     builder.resetOp();
 
     return {
