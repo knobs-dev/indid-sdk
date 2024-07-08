@@ -82,6 +82,7 @@ export interface IClientOpts {
   entryPoint?: string;
   overrideBundlerRpc?: string;
   overrideBackendUrl?: string;
+  overrideEntryPoint?: string;
   logLevel?: LogLevel
 }
 
@@ -99,6 +100,7 @@ export interface IConnectAccountOpts {
   moduleType: string;
   moduleAddress: string;
   storageType: string;
+  factoryAddress: string;
 }
 
 export interface ISendUserOperationOpts {
@@ -226,6 +228,26 @@ export interface IRetrieveSdkDefaultsResponse {
   error?: string;
 }
 
+export interface IGetAccountInfoRequest {
+  accountAddress: string;
+}
+
+export interface IGetAccountInfoResponse {
+  factoryAddress: string;
+  moduleAddress: string;
+  storageType: string;
+  moduleType: string;
+  initCode: string;
+  guardians?: string[];
+  guardiansHash?: string;
+  guardianStructId?: string;
+  error?: string;
+}
+
+export interface IConnectAccountResponse {
+  error?: string;
+}
+
 export interface IWebHookSignatureRequest {
   headers: {
     signature: string;
@@ -296,4 +318,23 @@ export interface IUserOperationOptions {
   preVerificationGas?: BigNumberish;
   maxFeePerGas?: BigNumberish;
   maxPriorityFeePerGas?: BigNumberish;
+}
+
+export interface IDelegatedTransactionOptions {
+  doNotRevertOnTxFailure?: boolean;
+  deadlineSeconds?: number;
+}
+
+export interface ISendDelegatedTransactionsRequest {
+  accountAddress: string;
+  moduleAddress: string;
+  data: BytesLike;
+  nonce: BigNumberish;
+  deadline: number;
+  sigs: BytesLike;
+}
+
+export interface ISendDelegatedTransactionsResponse {
+  taskId: string;
+  error?: string;
 }
