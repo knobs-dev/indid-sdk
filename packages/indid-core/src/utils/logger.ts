@@ -40,32 +40,33 @@ export class Logger implements ILogger {
    * @param message - The message to log 
    */
   log(...args: any[]): void {
-    console.info(...args); // Always logs
+    console.info(...args);
   }
 
   debug(...args: any[]): void {
-    if (this.logLevel >= LogLevel.DEBUG) {
+    if (this.logLevel <= LogLevel.DEBUG) {
+      // Blue
       console.info('\x1b[34m%s\x1b[0m', '[DEBUG]', ...args);
     }
   }
 
   info(...args: any[]): void {
-    if (this.logLevel >= LogLevel.INFO) {
     if (this.logLevel <= LogLevel.INFO) {
+      // Green
       console.info('\x1b[32m%s\x1b[0m', '[INFO]', ...args);
     }
   }
 
   warn(...args: any[]): void {
-    if (this.logLevel >= LogLevel.WARNING) {
     if (this.logLevel <= LogLevel.WARNING) {
+      // Yellow
       console.warn('\x1b[33m%s\x1b[0m', '[WARNING]', ...args);
     }
   }
 
   error(...args: any[]): void {
-    if (this.logLevel >= LogLevel.ERROR) {
     if (this.logLevel <= LogLevel.ERROR) {
+      // Red
       console.error('\x1b[31m%s\x1b[0m', '[ERROR]', ...args);
     }
   }
