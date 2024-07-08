@@ -14,6 +14,7 @@ import {
   IDelegatedTransactionOptions,
   ISendDelegatedTransactionsResponse,
   ICall,
+  UserOperationBuilder,
   Logger,
   LogLevel
 } from "@indid/indid-core-sdk";

@@ -113,7 +113,6 @@ export class Client {
     //  This line of code is setting entryPointAddress based on the first truthy value found among the following, in order:
     instance.entryPointAddress = opts?.overrideEntryPoint || EntryPointAddress[Number(instance.chainId)] || EntryPointAddress[137];
 
-
     Logger.getInstance().setLogLevel(opts?.logLevel || LogLevel.NONE);
     Logger.getInstance().debug(`EntryPointAddress: ${instance.entryPointAddress}`);
     Logger.getInstance().debug(`Backend url: ${instance.backendCaller.backendUrl}`);
