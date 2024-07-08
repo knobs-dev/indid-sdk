@@ -1,5 +1,15 @@
 # @indid/indid-core-sdk
 
+## 0.1.0
+
+### Minor Changes
+
+- 064ef26: Added support for notarization, delegated transactions, and module versioning
+
+### Patch Changes
+
+- 064ef26: examples and waitTask fix
+
 ## 0.0.4
 
 ### Patch Changes
