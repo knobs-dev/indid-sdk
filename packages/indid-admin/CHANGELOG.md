@@ -1,5 +1,13 @@
 # @indid/indid-admin-sdk
 
+## 0.0.4
+
+### Patch Changes
+
+- 5c7ff26: examples and waitTask fix
+- Updated dependencies [5c7ff26]
+  - @indid/indid-core-sdk@0.0.4
+
 ## 0.0.3
 
 ### Patch Changes

@@ -51,18 +51,21 @@ export class Logger implements ILogger {
 
   info(...args: any[]): void {
     if (this.logLevel >= LogLevel.INFO) {
+    if (this.logLevel <= LogLevel.INFO) {
       console.info('\x1b[32m%s\x1b[0m', '[INFO]', ...args);
     }
   }
 
   warn(...args: any[]): void {
     if (this.logLevel >= LogLevel.WARNING) {
+    if (this.logLevel <= LogLevel.WARNING) {
       console.warn('\x1b[33m%s\x1b[0m', '[WARNING]', ...args);
     }
   }
 
   error(...args: any[]): void {
     if (this.logLevel >= LogLevel.ERROR) {
+    if (this.logLevel <= LogLevel.ERROR) {
       console.error('\x1b[31m%s\x1b[0m', '[ERROR]', ...args);
     }
   }
