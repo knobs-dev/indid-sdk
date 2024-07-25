@@ -209,7 +209,7 @@ export class Client {
     }
 
     const entryPoint = EntryPoint__factory.connect(
-      EntryPointAddress[137],
+      this.entryPointAddress,
       this.provider
     );
 
