@@ -332,6 +332,7 @@ export interface ISendDelegatedTransactionsRequest {
   nonce: BigNumberish;
   deadline: number;
   sigs: BytesLike;
+  webhookData?: IWebHookRequest;
 }
 
 export interface ISendDelegatedTransactionsResponse {
