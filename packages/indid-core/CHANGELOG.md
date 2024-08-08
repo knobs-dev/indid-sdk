@@ -1,5 +1,12 @@
 # @indid/indid-core-sdk
 
+## 0.1.2
+
+### Patch Changes
+
+- cf4bd44: added missing webhookData field for delegated transactions
+- cf4bd44: hotfix: fixed an error when using custom entrypoints
+
 ## 0.1.1
 
 ### Patch Changes
