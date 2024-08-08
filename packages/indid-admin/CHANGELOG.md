@@ -1,5 +1,13 @@
 # @indid/indid-admin-sdk
 
+## 0.1.1
+
+### Patch Changes
+
+- 1ed3e05: hotfix: fixed an error when using custom entrypoints
+- Updated dependencies [1ed3e05]
+  - @indid/indid-core-sdk@0.1.1
+
 ## 0.1.0
 
 ### Minor Changes
