@@ -21,11 +21,11 @@ import {
 import {
   EnterpriseModule__factory, UsersModule__factory,
 } from "@indid/indid-typechains";
-import { ethers } from "ethers";
-
+import { BigNumberish, ethers } from "ethers";
+import { Interface } from "ethers/lib/utils";
 
 class AdminClient extends Client {
-  private constructor(rpcUrl: string, apiKey: string, opts?: IClientOpts) {
+  private constructor(rpcUrl: string | undefined, apiKey: string, opts?: IClientOpts) {
     super(rpcUrl, apiKey, opts);
   }
 
@@ -33,6 +33,13 @@ class AdminClient extends Client {
     const instance = new AdminClient(rpcUrl, apiKey, opts);
     Logger.getInstance().setLogLevel(opts?.logLevel || LogLevel.NONE);
     await this.initialize(instance, opts);
+    return instance;
+  }
+
+  public static async initWithoutProvider(apiKey: string, chainId: BigNumberish, opts?: IClientOpts) {
+    const instance = new AdminClient(undefined, apiKey, opts);
+    instance.chainId = chainId;
+    await this.initializeWithoutProvider(instance, opts);
     return instance;
   }
 
@@ -101,6 +108,9 @@ class AdminClient extends Client {
     webhookData?: IWebHookRequest,
     opts?: ICreateAccountOpts
   ): Promise<ICreateAndConnectAccountResponse> {
+    if (!this.provider) {
+      throw new Error("Provider has not been connected, please use the connectProvider function");
+    }
     let seed: string | undefined;
     if (signer == undefined && this.signer !== undefined) {
       const wallet = ethers.Wallet.createRandom();
@@ -153,6 +163,9 @@ class AdminClient extends Client {
   async getUserOpSponsorship(
     builder: IUserOperationBuilder
   ): Promise<IUserOpSponsorshipResponse> {
+    if (!this.provider) {
+      throw new Error("Provider has not been connected, please use the connectProvider function");
+    }
     const response = await this.backendCaller.signPaymasterOp(
       OpToJSON(builder.getOp())
     );
@@ -170,6 +183,9 @@ class AdminClient extends Client {
     guardianSigner: ethers.Wallet | ethers.providers.JsonRpcSigner,
     webhookData?: IWebHookRequest
   ): Promise<IRecoverAccountResponse> {
+    if (!this.provider) {
+      throw new Error("Provider has not been connected, please use the connectProvider function");
+    }
     const moduleK = EnterpriseModule__factory.connect(
       this.moduleAddress,
       this.provider
@@ -218,21 +234,22 @@ class AdminClient extends Client {
       throw new Error("No signer available, create or connect account first");
     }
 
-    let module;
+    let abi;
     if (this.moduleType === "enterprise") {
-      module = EnterpriseModule__factory.connect(
-        this.moduleAddress,
-        this.provider
-      );
+      abi = EnterpriseModule__factory.abi;
     } else if (this.moduleType === "users") {
-      module = UsersModule__factory.connect(this.moduleAddress, this.provider);
+      abi = UsersModule__factory.abi;
+    } else {
+      throw new Error("Invalid module type");
     }
 
-    const calldataMulticall = (
-      await module!.populateTransaction[
-        opts?.doNotRevertOnTxFailure ? "multiCallNoRevert" : "multiCall"
-      ](this.accountAddress, transactions)
-    ).data!;
+    const moduleInterface = new Interface(abi);
+
+    const functionName = opts?.doNotRevertOnTxFailure ? "multiCallNoRevert" : "multiCall";
+    const calldataMulticall = moduleInterface.encodeFunctionData(
+      functionName,
+      [this.accountAddress, transactions]
+    );
 
     const currentTime = Math.round(new Date().getTime() / 1000);
     const deadline = currentTime + (opts?.deadlineSeconds || 60 * 60);

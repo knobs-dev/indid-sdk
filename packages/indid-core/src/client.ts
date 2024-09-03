@@ -53,7 +53,7 @@ import { ec as EC } from "elliptic";
 import * as crypto from "crypto";
 
 export class Client {
-  public provider: BundlerJsonRpcProvider;
+  public provider?: BundlerJsonRpcProvider;
   public backendCaller: BackendCaller;
   public signer?: ethers.providers.JsonRpcSigner | ethers.Wallet | any;
   public entryPointAddress: string;
@@ -69,11 +69,13 @@ export class Client {
   public entryPoint: EntryPoint;
   public chainId: BigNumberish;
 
-  public constructor(rpcUrl: string, apiKey: string, opts?: IClientOpts) {
-    this.provider = new BundlerJsonRpcProvider(rpcUrl).setBundlerRpc(
-      opts?.overrideBundlerRpc
-      // "http://localhost:3000/rpc"
-    );
+  protected constructor(rpcUrl: string | undefined, apiKey: string, opts?: IClientOpts) {
+    if (rpcUrl) {
+      this.provider = new BundlerJsonRpcProvider(rpcUrl).setBundlerRpc(
+        opts?.overrideBundlerRpc
+        // "http://localhost:3000/rpc"
+      );
+    }
 
     Logger.getInstance().setLogLevel(opts?.logLevel || LogLevel.NONE);
 
@@ -101,7 +103,49 @@ export class Client {
     return instance;
   }
 
+  public static async initWithoutProvider(apiKey: string, chainId: BigNumberish, opts?: IClientOpts) {
+    const instance = new Client(undefined, apiKey, opts);
+    instance.chainId = chainId;
+    await this.initializeWithoutProvider(instance, opts);
+    return instance;
+  }
+
+  static async initializeWithoutProvider(instance: Client, opts?: IClientOpts) {
+    instance.backendCaller.backendUrl =
+      opts?.overrideBackendUrl || "https://api.indid.io";
+
+    instance.backendCaller.chainId = instance.chainId.toString();
+
+    //  This line of code is setting entryPointAddress based on the first truthy value found among the following, in order:
+    instance.entryPointAddress = opts?.overrideEntryPoint || EntryPointAddress[Number(instance.chainId)] || EntryPointAddress[137];
+
+    Logger.getInstance().setLogLevel(opts?.logLevel || LogLevel.NONE);
+    Logger.getInstance().debug(`EntryPointAddress: ${instance.entryPointAddress}`);
+    Logger.getInstance().debug(`Backend url: ${instance.backendCaller.backendUrl}`);
+
+    const response = await instance.backendCaller.retrieveSdkDefaults();
+
+    if (response.error) {
+      throw new Error(response.error);
+    }
+
+    instance.moduleAddress = response._module;
+    instance.factoryAddress = response.factoryAddress;
+    instance.storageType = response.storageType;
+    instance.guardians = response._guardians;
+    if (instance.storageType === "standard") {
+      instance.guardiansHash = response._guardiansHash;
+    }
+    if (instance.storageType === "shared") {
+      instance.guardianStructId = response._guardianId;
+    }
+    instance.moduleType = response.moduleType;
+  }
+
   static async initialize(instance: Client, opts?: IClientOpts) {
+    if (!instance.provider) {
+      throw new Error("Provider has not been connected, please use the connectProvider function");
+    }
     instance.chainId = await instance.provider
       .getNetwork()
       .then((network) => ethers.BigNumber.from(network.chainId));
@@ -141,11 +185,23 @@ export class Client {
     instance.moduleType = response.moduleType;
   }
 
+  public async connectProvider(rpcUrl: string) {
+    this.provider = new BundlerJsonRpcProvider(rpcUrl);
+    this.entryPoint = EntryPoint__factory.connect(
+      this.entryPointAddress,
+      this.provider
+    );  
+    //FIXME: check if there are other things to be done here 
+  }
+
   public async getCounterfactualAddress(
     owner: string,
     salt: string = "0",
     opts?: ICreateAccountOpts
   ): Promise<IGetCounterfactualAddressResponse> {
+    if (!this.provider) {
+      throw new Error("Provider has not been connected, please use the connectProvider function");
+    }
     let response = await this.getInitCode(owner, salt, opts);
 
     if (response.error) {
@@ -175,6 +231,9 @@ export class Client {
   public async getAccountNonce(
     accountAddress?: string
   ): Promise<IGetNonceResponse> {
+    if (!this.provider) {
+      throw new Error("Provider has not been connected, please use the connectProvider function");
+    }
     if (accountAddress === undefined) {
       if (this.accountAddress === "0x") {
         return {
@@ -197,6 +256,9 @@ export class Client {
   public async getNonSequentialAccountNonce(
     accountAddress?: string
   ): Promise<IGetNonceResponse> {
+    if (!this.provider) {
+      throw new Error("Provider has not been connected, please use the connectProvider function");
+    }
     if (accountAddress === undefined) {
       if (this.accountAddress === "0x") {
         return {
@@ -260,6 +322,9 @@ export class Client {
     calldata: string[],
     opts?: IUserOperationOptions
   ): Promise<IUserOperationBuilder> {
+    if (!this.provider) {
+      throw new Error("Provider has not been connected, please use the connectProvider function");
+    }
     const transactions: ICall[] = [];
     for (let i = 0; i < to.length; i++) {
       transactions.push({
@@ -269,7 +334,7 @@ export class Client {
       });
     }
 
-   
+
 
     const account = SimpleAccount__factory.connect(
       this.accountAddress,
@@ -360,6 +425,9 @@ export class Client {
     newOwner: string,
     opts?: IUserOperationOptions
   ): Promise<IUserOperationBuilder> {
+    if (!this.provider) {
+      throw new Error("Provider has not been connected, please use the connectProvider function");
+    }
     if (this.signer === undefined) {
       throw new Error("No signer available, create or connect account first");
     }
@@ -406,6 +474,9 @@ export class Client {
     signatures: string,
     opts?: IUserOperationOptions
   ): Promise<IUserOperationBuilder> {
+    if (!this.provider) {
+      throw new Error("Provider has not been connected, please use the connectProvider function");
+    }
     const account = SimpleAccount__factory.connect(
       this.accountAddress,
       this.provider
@@ -575,11 +646,14 @@ export class Client {
     amount: BigNumberish,
     opts?: IUserOperationOptions
   ): Promise<IUserOperationBuilder> {
+    if (!this.provider) {
+      throw new Error("Provider has not been connected, please use the connectProvider function");
+    }
     if (this.signer === undefined) {
       throw new Error("No signer available, create or connect account first");
     }
 
-    const erc20 = ERC20__factory.connect(contractAddress, this.signer);
+    const erc20 = ERC20__factory.connect(contractAddress, this.provider);
     const calldata = (
       await erc20.populateTransaction.transfer(recipientAddress, amount)
     ).data!;
@@ -696,6 +770,9 @@ export class Client {
     multiCallGasEstimated?: BigNumber,
     opts?: IUserOperationOptions
   ): Promise<UserOperationBuilder> {
+    if (!this.provider) {
+      throw new Error("Provider has not been connected, please use the connectProvider function");
+    }
     let builder = new UserOperationBuilder();
     builder.setSender(this.accountAddress);
     builder.setCallData(callData);
@@ -803,6 +880,9 @@ export class Client {
   public async getUserOperationHash(
     builder: IUserOperationBuilder
   ): Promise<IGetUserOperationHashResponse> {
+    if (!this.provider) {
+      throw new Error("Provider has not been connected, please use the connectProvider function");
+    }
     const op = builder.getOp();
     const chainId = await this.provider.getNetwork().then((net) => net.chainId);
     const message = new UserOperationMiddlewareCtx(
@@ -816,6 +896,9 @@ export class Client {
   async signUserOperation(
     builder: IUserOperationBuilder
   ): Promise<ISignUserOperationResponse> {
+    if (!this.provider) {
+      throw new Error("Provider has not been connected, please use the connectProvider function");
+    }
     if (this.signer === undefined) {
       return {
         signature: "",
@@ -846,6 +929,9 @@ export class Client {
     waitIntervalMs: number = 5000,
     opts?: ISendUserOperationOpts
   ) {
+    if (!this.provider) {
+      throw new Error("Provider has not been connected, please use the connectProvider function");
+    }
     const dryRun = Boolean(opts?.dryRun);
     const op = await this.buildUserOperation(builder);
     opts?.onBuild?.(op);
@@ -868,9 +954,8 @@ export class Client {
         if (dryRun) {
           return null;
         }
-
         const end = Date.now() + timeoutMs;
-        const block = await this.provider.getBlock("latest");
+        const block = await this.provider!.getBlock("latest");
         while (Date.now() < end) {
           const events = await this.entryPoint.queryFilter(
             this.entryPoint.filters.UserOperationEvent(userOpHash),
