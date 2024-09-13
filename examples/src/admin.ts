@@ -11,7 +11,7 @@ const privKey = process.env.PRIVATE_KEY;
 const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
 
 async function run() {
-  const clientUser = await AdminClient.init(rpcUrl, coreApiKey);
+  const clientUser = await AdminClient.init({rpcUrl: rpcUrl, apiKey: coreApiKey});
 
   // generate a new wallet
   const wallet = privKey? new ethers.Wallet(privKey) : ethers.Wallet.createRandom();

@@ -1,17 +1,19 @@
-import { Client } from "@indid/indid-core-sdk";
+import { AdminClient } from '@indid/indid-admin-sdk'
 import dotenv from "dotenv";
 import { ethers } from "ethers";
 
 // Load env file
 dotenv.config();
 
+const chainId = process.env.CHAIN_ID!;
 const rpcUrl = process.env.RPC_URL!;
-const coreApiKey = process.env.INDID_PUB_APIKEY!;
+const coreApiKey = process.env.INDID_ADMIN_KEY!;
 const privKey = process.env.PRIVATE_KEY;
 const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+const friendAddress = process.env.FRIEND_ADDRESS!;
 
 async function run() {
-  const clientUser = await Client.init({rpcUrl: rpcUrl, apiKey: coreApiKey});
+  const clientUser = await AdminClient.init({chainId: chainId, apiKey: coreApiKey});
 
   // generate a new wallet
   const wallet = privKey? new ethers.Wallet(privKey) : ethers.Wallet.createRandom();
@@ -25,38 +27,33 @@ async function run() {
     accountAddress
   );
 
-  // connect smart account
-  clientUser.connectAccount(wallet, accountAddress);
+  // connect and deploy smart account
+  const { error, accountAddress: address } = await clientUser.createAndConnectAccount(wallet);
 
+  if(error) {
+    console.error(error);
+    return;
+  }
+ 
 
-  // wait until address has balance greater than 0 - you can send money
+  // wait until address has balance greater than 0
   while ((await provider.getBalance(accountAddress)).isZero()) {
     await new Promise((resolve) => setTimeout(resolve, 10000));
     console.log("waiting for balance to be greater than 0");
   }
 
-  /**
-   * smart accounts are deployed automatically when you send your first operation
-   */
+  const send0 = {
+    to: friendAddress,
+    value: 1,
+    data: "0x"
+  }
 
-  const {initCode, error} = await clientUser.getInitCode();
+  const resp = await clientUser.sendDelegatedTransactions([send0], { deadlineSeconds: 100000000 });
+  console.log("send delegated transactions response", resp);
 
-  const userop = await clientUser.prepareSendETH(
-    accountAddress,
-    ethers.utils.parseEther("0.001"),
-    {
-      initCode: initCode,
-    }
-  );
+  const taskResp = await clientUser.waitTask(resp.taskId);
+  console.log("task response", taskResp);
 
-  // send the operation
-  await clientUser.signUserOperation(userop)
-
-  const tx = await clientUser.sendUserOperation(userop);
-
-  await clientUser.waitTask(tx.taskId);
-
-  console.log("task completed");
 }
 
 run()

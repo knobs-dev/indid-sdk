@@ -14,6 +14,7 @@ export interface IUserOperation {
   maxPriorityFeePerGas: BigNumberish;
   paymasterAndData: BytesLike;
   signature: BytesLike;
+  chainId?: BigNumberish;
 }
 
 export interface IUserOperationBuilder {
@@ -78,13 +79,16 @@ export interface IUserOperationMiddlewareCtx {
   getUserOpHash: () => string;
 }
 
-export interface IClientOpts {
-  entryPoint?: string;
+export interface IClientConfig {
+  apiKey: string;
+  rpcUrl?: string;
+  chainId?: BigNumberish;
   overrideBundlerRpc?: string;
   overrideBackendUrl?: string;
   overrideEntryPoint?: string;
   logLevel?: LogLevel
 }
+
 
 export interface ICreateAccountOpts {
   storageType: string;
@@ -101,6 +105,7 @@ export interface IConnectAccountOpts {
   moduleAddress: string;
   storageType: string;
   factoryAddress: string;
+  chainId?: BigNumberish;
 }
 
 export interface ISendUserOperationOpts {
@@ -149,6 +154,7 @@ export interface IWebHookRequest {
 export interface IRecoverAccountRequest {
   newOwner: string;
   walletAddress: string;
+  chainId: BigNumberish;
   signature: string;
   nonce: string;
   deadline: number;
@@ -168,6 +174,7 @@ export interface ICreateAccountRequest {
   _module?: string;
   salt?: string;
   webhookData?: IWebHookRequest;
+  chainId: BigNumberish;
 }
 
 export interface ICreateAccountResponse {
@@ -198,6 +205,11 @@ export interface IUserOpSponsorshipResponse {
   error?: string;
 }
 
+export interface IOPStatusRequest {
+  opHash: string;
+  chainId: BigNumberish;
+}
+
 export interface IOpStatusResponse {
   receipt: IUserOperationReceipt;
   error?: string;
@@ -209,6 +221,7 @@ export interface ISendUserOpRequest {
 }
 
 export interface IBSendUserOpRequest extends IUserOperation {
+  chainId: BigNumberish;
   webhookData?: IWebHookRequest;
 }
 export interface ISendUserOpResponse {
@@ -230,6 +243,7 @@ export interface IRetrieveSdkDefaultsResponse {
 
 export interface IGetAccountInfoRequest {
   accountAddress: string;
+  chainId: BigNumberish;
 }
 
 export interface IGetAccountInfoResponse {
@@ -321,12 +335,15 @@ export interface IUserOperationOptions {
 }
 
 export interface IDelegatedTransactionOptions {
+  chainId?: BigNumberish;
   doNotRevertOnTxFailure?: boolean;
   deadlineSeconds?: number;
+  webhookData?: IWebHookRequest;
 }
 
 export interface ISendDelegatedTransactionsRequest {
   accountAddress: string;
+  chainId: BigNumberish;
   moduleAddress: string;
   data: BytesLike;
   nonce: BigNumberish;
