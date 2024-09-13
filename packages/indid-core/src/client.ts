@@ -2,7 +2,6 @@ import { BigNumber, BigNumberish, ethers } from "ethers";
 import {
   IUserOperationBuilder,
   ISendUserOperationOpts,
-  IClientOpts,
   ICreateAccountOpts,
   IConnectAccountOpts,
   ISendUserOpResponse,
@@ -20,6 +19,7 @@ import {
   ICall,
   IConnectAccountResponse,
   IInitCodeRequest,
+  IClientConfig,
 } from "./types";
 import { LogLevel, Logger, OpToJSON, signEIP712Transaction } from "./utils";
 import { UserOperationMiddlewareCtx } from "./context";
@@ -69,19 +69,19 @@ export class Client {
   public entryPoint: EntryPoint;
   public chainId: BigNumberish;
 
-  protected constructor(rpcUrl: string | undefined, apiKey: string, opts?: IClientOpts) {
-    if (rpcUrl) {
-      this.provider = new BundlerJsonRpcProvider(rpcUrl).setBundlerRpc(
-        opts?.overrideBundlerRpc
-        // "http://localhost:3000/rpc"
-      );
-    }
+  protected constructor(config: IClientConfig) {
+    // if (config.overrideBundlerRpc) {
+    //   this.provider = new BundlerJsonRpcProvider(config.overrideBundlerRpc).setBundlerRpc(
+    //     config.overrideBundlerRpc
+    //     // "http://localhost:3000/rpc"
+    //   );
+    // }
 
-    Logger.getInstance().setLogLevel(opts?.logLevel || LogLevel.NONE);
+    Logger.getInstance().setLogLevel(config.logLevel || LogLevel.NONE);
 
     this.backendCaller = new BackendCaller(
-      opts?.overrideBackendUrl || "https://api.indid.io",
-      apiKey
+      config.overrideBackendUrl || "https://api.indid.io",
+      config.apiKey
     );
 
     this.entryPointAddress = "0x";
@@ -97,92 +97,68 @@ export class Client {
     this.entryPoint = "0x" as any;
   }
 
-  public static async init(rpcUrl: string, apiKey: string, opts?: IClientOpts) {
-    const instance = new Client(rpcUrl, apiKey, opts);
-    await this.initialize(instance, opts);
+  public static async init(config: IClientConfig) {
+    const instance = new Client(config);
+    await this.initialize(instance, config);
     return instance;
   }
 
-  public static async initWithoutProvider(apiKey: string, chainId: BigNumberish, opts?: IClientOpts) {
-    const instance = new Client(undefined, apiKey, opts);
-    instance.chainId = chainId;
-    await this.initializeWithoutProvider(instance, opts);
-    return instance;
-  }
+  static async initialize(instance: Client, config: IClientConfig) {
 
-  static async initializeWithoutProvider(instance: Client, opts?: IClientOpts) {
+    if (config.rpcUrl) {
+      Logger.getInstance().debug("rpcUrl provided, connecting to provider");
+      instance.provider = new BundlerJsonRpcProvider(config.rpcUrl);
+      instance.chainId = await instance.provider
+        .getNetwork()
+        .then((network) => ethers.BigNumber.from(network.chainId));
+
+      //This line of code is setting entryPointAddress based on the first truthy value found among the following, in order:
+      instance.entryPointAddress = config.overrideEntryPoint || EntryPointAddress[Number(instance.chainId)] || EntryPointAddress[137];
+
+      instance.entryPoint = EntryPoint__factory.connect(
+        instance.entryPointAddress,
+        instance.provider
+      );
+    }
+
+    else if (config.chainId) {
+      Logger.getInstance().debug("chainId provided, setting chainId");
+      instance.chainId = config.chainId;
+      //This line of code is setting entryPointAddress based on the first truthy value found among the following, in order:
+      instance.entryPointAddress = config.overrideEntryPoint || EntryPointAddress[Number(instance.chainId)] || EntryPointAddress[137];
+    }
+
+    else {
+      Logger.getInstance().debug("You are initializing the client without a chainId or rpcUrl");
+      instance.entryPointAddress = config.overrideEntryPoint || EntryPointAddress[137];
+    }
+
     instance.backendCaller.backendUrl =
-      opts?.overrideBackendUrl || "https://api.indid.io";
+      config.overrideBackendUrl || "https://api.indid.io";
 
-    instance.backendCaller.chainId = instance.chainId.toString();
-
-    //  This line of code is setting entryPointAddress based on the first truthy value found among the following, in order:
-    instance.entryPointAddress = opts?.overrideEntryPoint || EntryPointAddress[Number(instance.chainId)] || EntryPointAddress[137];
-
-    Logger.getInstance().setLogLevel(opts?.logLevel || LogLevel.NONE);
+    Logger.getInstance().setLogLevel(config.logLevel || LogLevel.NONE);
     Logger.getInstance().debug(`EntryPointAddress: ${instance.entryPointAddress}`);
     Logger.getInstance().debug(`Backend url: ${instance.backendCaller.backendUrl}`);
 
-    const response = await instance.backendCaller.retrieveSdkDefaults();
+    const response = await instance.backendCaller.retrieveSdkDefaults(instance.chainId);
 
     if (response.error) {
       throw new Error(response.error);
     }
+    else {
 
-    instance.moduleAddress = response._module;
-    instance.factoryAddress = response.factoryAddress;
-    instance.storageType = response.storageType;
-    instance.guardians = response._guardians;
-    if (instance.storageType === "standard") {
-      instance.guardiansHash = response._guardiansHash;
+      instance.moduleAddress = response._module;
+      instance.factoryAddress = response.factoryAddress;
+      instance.storageType = response.storageType;
+      instance.guardians = response._guardians;
+      if (instance.storageType === "standard") {
+        instance.guardiansHash = response._guardiansHash;
+      }
+      if (instance.storageType === "shared") {
+        instance.guardianStructId = response._guardianId;
+      }
+      instance.moduleType = response.moduleType;
     }
-    if (instance.storageType === "shared") {
-      instance.guardianStructId = response._guardianId;
-    }
-    instance.moduleType = response.moduleType;
-  }
-
-  static async initialize(instance: Client, opts?: IClientOpts) {
-    if (!instance.provider) {
-      throw new Error("Provider has not been connected, please use the connectProvider function");
-    }
-    instance.chainId = await instance.provider
-      .getNetwork()
-      .then((network) => ethers.BigNumber.from(network.chainId));
-
-    instance.backendCaller.chainId = instance.chainId.toString();
-    instance.backendCaller.backendUrl =
-      opts?.overrideBackendUrl || "https://api.indid.io";
-
-    //  This line of code is setting entryPointAddress based on the first truthy value found among the following, in order:
-    instance.entryPointAddress = opts?.overrideEntryPoint || EntryPointAddress[Number(instance.chainId)] || EntryPointAddress[137];
-
-    Logger.getInstance().setLogLevel(opts?.logLevel || LogLevel.NONE);
-    Logger.getInstance().debug(`EntryPointAddress: ${instance.entryPointAddress}`);
-    Logger.getInstance().debug(`Backend url: ${instance.backendCaller.backendUrl}`);
-
-    instance.entryPoint = EntryPoint__factory.connect(
-      instance.entryPointAddress,
-      instance.provider
-    );
-
-    const response = await instance.backendCaller.retrieveSdkDefaults();
-
-    if (response.error) {
-      throw new Error(response.error);
-    }
-
-    instance.moduleAddress = response._module;
-    instance.factoryAddress = response.factoryAddress;
-    instance.storageType = response.storageType;
-    instance.guardians = response._guardians;
-    if (instance.storageType === "standard") {
-      instance.guardiansHash = response._guardiansHash;
-    }
-    if (instance.storageType === "shared") {
-      instance.guardianStructId = response._guardianId;
-    }
-    instance.moduleType = response.moduleType;
   }
 
   public async connectProvider(rpcUrl: string) {
@@ -190,8 +166,12 @@ export class Client {
     this.entryPoint = EntryPoint__factory.connect(
       this.entryPointAddress,
       this.provider
-    );  
-    //FIXME: check if there are other things to be done here 
+    );
+    this.chainId = await this.provider
+      .getNetwork()
+      .then((network) => ethers.BigNumber.from(network.chainId));
+
+    Logger.getInstance().debug("connectProvider has set the chainId to: ", this.chainId);
   }
 
   public async getCounterfactualAddress(
@@ -288,20 +268,27 @@ export class Client {
   ): Promise<IConnectAccountResponse> {
     this.signer = signer;
     this.accountAddress = accountAddress;
+    if (this.chainId === 0 && opts?.chainId === undefined) {
+      return {
+        error: "No chainId provided, either pass chainId in options or connect to a provider",
+      }
+    }
+    let chainId = opts?.chainId || this.chainId;
 
     if (opts != null) {
       this.moduleAddress = opts.moduleAddress;
       this.moduleType = opts.moduleType;
       this.storageType = opts.storageType;
       this.factoryAddress = opts.factoryAddress;
-      //FIXME: factoryAddress is only useful is the account is a counterfactual
+      //TODO: factoryAddress is only useful is the account is a counterfactual
       // this.guardians = opts.guardians;
       // this.guardiansHash = opts.guardiansHash;
       // this.guardianStructId = opts.guardianStructId;
       return {};
     }
     else {
-      const response = await this.backendCaller.getAccountInfo({ accountAddress });
+      const response = await this.backendCaller.getAccountInfo({ accountAddress: accountAddress, chainId: chainId.toString() });
+      Logger.getInstance().debug("response backend caller getAccountInfo: ", response);
       this.moduleAddress = response.moduleAddress;
       this.moduleType = response.moduleType;
       this.storageType = response.storageType;
@@ -341,6 +328,7 @@ export class Client {
       this.provider
     );
 
+    Logger.getInstance().debug("moduleType: ", this.moduleType);
     let module;
     let multiCallGasEstimated;
     if (this.moduleType === "enterprise") {
@@ -507,10 +495,9 @@ export class Client {
     salt: string = "0",
     opts?: ICreateAccountOpts
   ): Promise<IInitCodeResponse> {
-    //TODO: test this flow
     if (this.accountAddress !== "0x") {
 
-      const response = await this.backendCaller.getAccountInfo({ accountAddress: this.accountAddress })
+      const response = await this.backendCaller.getAccountInfo({ accountAddress: this.accountAddress, chainId: this.chainId.toString() })
 
       return { initCode: response.initCode, error: response.error };
     }
@@ -612,6 +599,7 @@ export class Client {
     const response = await this.backendCaller.sendUserOp({
       ...builder.getOp(),
       webhookData,
+      chainId: this.chainId,
     });
 
     return {

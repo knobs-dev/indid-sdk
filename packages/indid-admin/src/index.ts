@@ -1,6 +1,5 @@
 import {
   Client,
-  IClientOpts,
   ICreateAccountResponse,
   ICreateAndConnectAccountResponse,
   IUserOperationBuilder,
@@ -14,9 +13,9 @@ import {
   IDelegatedTransactionOptions,
   ISendDelegatedTransactionsResponse,
   ICall,
-  UserOperationBuilder,
   Logger,
-  LogLevel
+  LogLevel,
+  IClientConfig
 } from "@indid/indid-core-sdk";
 import {
   EnterpriseModule__factory, UsersModule__factory,
@@ -25,21 +24,14 @@ import { BigNumberish, ethers } from "ethers";
 import { Interface } from "ethers/lib/utils";
 
 class AdminClient extends Client {
-  private constructor(rpcUrl: string | undefined, apiKey: string, opts?: IClientOpts) {
-    super(rpcUrl, apiKey, opts);
+  private constructor(config: IClientConfig) {
+    super(config);
   }
 
-  public static async init(rpcUrl: string, apiKey: string, opts?: IClientOpts) {
-    const instance = new AdminClient(rpcUrl, apiKey, opts);
-    Logger.getInstance().setLogLevel(opts?.logLevel || LogLevel.NONE);
-    await this.initialize(instance, opts);
-    return instance;
-  }
-
-  public static async initWithoutProvider(apiKey: string, chainId: BigNumberish, opts?: IClientOpts) {
-    const instance = new AdminClient(undefined, apiKey, opts);
-    instance.chainId = chainId;
-    await this.initializeWithoutProvider(instance, opts);
+  public static async init(config: IClientConfig) {
+    const instance = new AdminClient(config);
+    Logger.getInstance().setLogLevel(config.logLevel || LogLevel.NONE);
+    await this.initialize(instance, config);
     return instance;
   }
 
@@ -64,11 +56,13 @@ class AdminClient extends Client {
     if (config.storageType === "standard") {
       response = await this.backendCaller.backendCreateAccount({
         factoryAddress: config.factoryAddress,
+        chainId: this.chainId.toString(),
         owner: owner,
         _module: config.moduleAddress,
         _guardians: config.guardians,
         salt: salt,
         webhookData,
+
       });
     } else if (config.storageType === "shared") {
       if (opts != null) {
@@ -85,6 +79,7 @@ class AdminClient extends Client {
       }
       response = await this.backendCaller.backendCreateAccount({
         factoryAddress: config.factoryAddress,
+        chainId: this.chainId.toString(),
         owner: owner,
         _module: config.moduleAddress,
         _guardianId: config.guardianStructId,
@@ -166,9 +161,10 @@ class AdminClient extends Client {
     if (!this.provider) {
       throw new Error("Provider has not been connected, please use the connectProvider function");
     }
-    const response = await this.backendCaller.signPaymasterOp(
-      OpToJSON(builder.getOp())
-    );
+    const response = await this.backendCaller.signPaymasterOp({
+      ...OpToJSON(builder.getOp()),
+      chainId: this.chainId.toString()
+    });
     if (response.error) {
       return { paymasterAndData: "", error: response.error };
     }
@@ -213,6 +209,7 @@ class AdminClient extends Client {
     const response = await this.backendCaller.backendRecoverAccount({
       newOwner: newOwner,
       walletAddress: accountAddress,
+      chainId: this.chainId,
       signature: signature,
       nonce: nonce,
       deadline: deadline,
@@ -230,6 +227,13 @@ class AdminClient extends Client {
     transactions: ICall[],
     opts?: IDelegatedTransactionOptions
   ): Promise<ISendDelegatedTransactionsResponse> {
+    let chainId = opts?.chainId || this.chainId;
+    if (chainId === undefined || chainId === 0) {
+     return {
+      taskId: "",
+      error: "No chainId provided, either pass chainId in options or connect to a provider",
+     }
+    }
     if (this.signer === undefined) {
       throw new Error("No signer available, create or connect account first");
     }
@@ -259,7 +263,7 @@ class AdminClient extends Client {
       this.moduleAddress,
       calldataMulticall,
       deadline,
-      this.chainId,
+      chainId,
       [this.signer]
     );
 
@@ -277,11 +281,13 @@ class AdminClient extends Client {
 
     const response = await this.backendCaller.sendDelegatedTransactions({
       accountAddress: this.accountAddress,
+      chainId: chainId.toString(),
       moduleAddress: this.moduleAddress,
       data: calldataMulticall,
       nonce: nonce,
       deadline: deadline,
       sigs: signature,
+      webhookData: opts?.webhookData,
     });
 
     return {

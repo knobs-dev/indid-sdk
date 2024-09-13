@@ -14,13 +14,13 @@ const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
 
 // this function leverage the permission level of admin client to ask sponsorship - it should be placed on the backend side
 async function sponsorOperation(operation: UserOperationBuilder) : Promise<string> {
-  const adminClient = await AdminClient.init(rpcUrl, adminApiKey);
+  const adminClient = await AdminClient.init({rpcUrl: rpcUrl, apiKey: adminApiKey});
   const {error, paymasterAndData} =  await adminClient.getUserOpSponsorship(operation);
   return paymasterAndData;
 }
 
 async function run() {
-  const clientUser = await Client.init(rpcUrl, coreApiKey);
+  const clientUser = await Client.init({rpcUrl: rpcUrl, apiKey: coreApiKey});
 
   // generate a new wallet
   const wallet = privKey? new ethers.Wallet(privKey) : ethers.Wallet.createRandom();
