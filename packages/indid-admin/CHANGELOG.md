@@ -1,5 +1,16 @@
 # @indid/indid-admin-sdk
 
+## 0.2.0
+
+### Minor Changes
+
+- ce1e400: delegated transactions don't require a provider anymore, client init params have changed
+
+### Patch Changes
+
+- Updated dependencies [ce1e400]
+  - @indid/indid-core-sdk@0.2.0
+
 ## 0.1.2
 
 ### Patch Changes
