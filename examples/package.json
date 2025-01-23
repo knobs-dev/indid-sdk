@@ -17,8 +17,8 @@
   "author": "Stefano",
   "license": "MIT",
   "dependencies": {
-    "@indid/indid-admin-sdk": "^0.0.3",
-    "@indid/indid-core-sdk": "^0.0.3",
+    "@indid/indid-admin-sdk": "^0.2.0",
+    "@indid/indid-core-sdk": "^0.2.0",
     "dotenv": "^16.4.5",
     "ethers": "^5.7.2"
   }
