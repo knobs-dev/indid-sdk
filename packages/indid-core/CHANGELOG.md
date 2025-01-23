@@ -1,5 +1,11 @@
 # @indid/indid-core-sdk
 
+## 0.2.1
+
+### Patch Changes
+
+- 3f8593d: changed default webhook verifying key to prod
+
 ## 0.2.0
 
 ### Minor Changes
