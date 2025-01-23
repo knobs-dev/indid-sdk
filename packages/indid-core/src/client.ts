@@ -980,11 +980,15 @@ export class Client {
       return false;
     }
 
+    //FIXME: add "changed default webhook key to prod key" to the commit message
     // Use verifyingKey if it's provided, otherwise use the default key
     const publicKey = curve.keyFromPublic(
       verifyingKey
         ? verifyingKey
-        : "041294b0d86c27e213d1678b2fe8c7a4296971c16671004596e59dcf13f9c940995a67a0b928a875dcb615cdc28048ae95e11a516a6caac35f0ef65c328d4d7f60",
+        //prod key
+        : "04e450bafe7e0772618749f7dcb1c941a62454103bcb11741d22125099e6f4cf7094fc2f40eab745c578f51e21b32683e1a285f9806c86929c92a98fbd50c96d71",
+        //dev key
+        // : "041294b0d86c27e213d1678b2fe8c7a4296971c16671004596e59dcf13f9c940995a67a0b928a875dcb615cdc28048ae95e11a516a6caac35f0ef65c328d4d7f60",
       "hex"
     );
     const outcome = publicKey.verify(hash, req.headers.signature);
