@@ -1,4 +1,4 @@
-import { UserOperationEventEvent } from "@indid/indid-typechains/dist/EntryPoint";
+// import { UserOperationEventEvent } from "@indid/indid-typechains/dist/EntryPoint";
 import { BigNumberish, BytesLike } from "ethers";
 import { LogLevel } from "./utils";
 
@@ -16,6 +16,7 @@ export interface IUserOperation {
   signature: BytesLike;
   chainId?: BigNumberish;
 }
+
 
 export interface IUserOperationBuilder {
   // get methods.
@@ -97,7 +98,7 @@ export interface ICreateAccountOpts {
   moduleAddress: string;
   guardians: string[];
   guardiansHash?: BytesLike;
-  guardianStructId?: BytesLike;
+  beaconId?: BytesLike;
 }
 
 export interface IConnectAccountOpts {
@@ -105,6 +106,8 @@ export interface IConnectAccountOpts {
   moduleAddress: string;
   storageType: string;
   factoryAddress: string;
+  accountVersion: string;
+  moduleVersion: string;
   chainId?: BigNumberish;
 }
 
@@ -113,9 +116,19 @@ export interface ISendUserOperationOpts {
   onBuild?: (op: IUserOperation) => Promise<any> | any;
 }
 
+export interface IUserOperationEvent {
+  userOpHash: string;
+  sender: string;
+  paymaster: string;
+  nonce: BigNumberish;
+  success: boolean;
+  actualGasCost: BigNumberish;
+  actualGasUsed: BigNumberish;
+}
+
 export interface ISendUserOperationResponse {
   userOpHash: string;
-  wait: () => Promise<UserOperationEventEvent | null>;
+  wait: () => Promise<IUserOperationEvent | null>;
 }
 
 export interface IPresetBuilderOpts {
@@ -238,6 +251,7 @@ export interface IRetrieveSdkDefaultsResponse {
   _guardiansHash: string;
   _guardianId: string;
   storageType: string;
+  accountVersion: string;
   error?: string;
 }
 
@@ -252,6 +266,10 @@ export interface IGetAccountInfoResponse {
   storageType: string;
   moduleType: string;
   initCode: string;
+  accountVersion: string;
+  moduleVersion: string;
+  owners?: string[];
+  ownersHash?: string;
   guardians?: string[];
   guardiansHash?: string;
   guardianStructId?: string;
@@ -270,7 +288,7 @@ export interface IWebHookSignatureRequest {
   body: Record<string, unknown>;
 }
 
-export enum TaskUserOperationStatus { 
+export enum TaskUserOperationStatus {
   PENDING = "PENDING",
   EXECUTED = "EXECUTED",
   REVERTED = "REVERTED",
@@ -356,3 +374,149 @@ export interface ISendDelegatedTransactionsResponse {
   taskId: string;
   error?: string;
 }
+
+
+//minimal abis
+//TODO: move this to separate location
+
+// Add this minimal EntryPoint ABI with only the functions used in client.ts
+export const EntryPointMinimalABI = [
+  // For getNonce method
+  {
+    "inputs": [
+      { "name": "sender", "type": "address" },
+      { "name": "key", "type": "uint192" }
+    ],
+    "name": "getNonce",
+    "outputs": [{ "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  // For getAddress method
+  {
+    "name": "getAddress",
+    "outputs": [{ "name": "", "type": "address" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  // For UserOperationEvent
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "name": "userOpHash", "type": "bytes32" },
+      { "indexed": true, "name": "sender", "type": "address" },
+      { "indexed": false, "name": "paymaster", "type": "address" },
+      { "indexed": false, "name": "nonce", "type": "uint256" },
+      { "indexed": false, "name": "success", "type": "bool" },
+      { "indexed": false, "name": "actualGasCost", "type": "uint256" },
+      { "indexed": false, "name": "actualGasUsed", "type": "uint256" }
+    ],
+    "name": "UserOperationEvent",
+    "type": "event"
+  }
+];
+
+
+export const ModuleMinimalABIV1 = [
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_wallet",
+        "type": "address"
+      },
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "value",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bytes",
+            "name": "data",
+            "type": "bytes"
+          }
+        ],
+        "internalType": "struct EnterpriseTransactionManager.Call[]",
+        "name": "_transactions",
+        "type": "tuple[]"
+      }
+    ],
+    "name": "multiCall",
+    "outputs": [
+      {
+        "internalType": "bytes[]",
+        "name": "",
+        "type": "bytes[]"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_wallet",
+        "type": "address"
+      },
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "value",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bytes",
+            "name": "data",
+            "type": "bytes"
+          }
+        ],
+        "internalType": "struct EnterpriseTransactionManager.Call[]",
+        "name": "_transactions",
+        "type": "tuple[]"
+      }
+    ],
+    "name": "multiCallNoRevert",
+    "outputs": [
+      {
+        "internalType": "bytes[]",
+        "name": "",
+        "type": "bytes[]"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  // For ownership transfer
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_wallet",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "_newOwner",
+        "type": "address"
+      }
+    ],
+    "name": "transferOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+];

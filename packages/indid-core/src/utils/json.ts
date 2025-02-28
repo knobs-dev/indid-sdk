@@ -6,7 +6,7 @@ export const OpToJSON = (op: IUserOperation): IUserOperation => {
     .map((key) => {
       let val = (op as any)[key];
       if (typeof val !== "string" || !val.startsWith("0x")) {
-        val = ethers.utils.hexValue(val);
+        val = ethers.hexlify(val);
       }
       return [key, val];
     })

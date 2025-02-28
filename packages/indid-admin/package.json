@@ -28,7 +28,6 @@
     "typescript": "^5.1.3"
   },
   "dependencies": {
-    "@indid/indid-core-sdk": "workspace:*",
-    "@indid/indid-typechains": "workspace:*"
+    "@indid/indid-core-sdk": "workspace:*" 
   }
 }

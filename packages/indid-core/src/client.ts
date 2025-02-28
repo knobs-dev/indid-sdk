@@ -1,4 +1,11 @@
-import { BigNumber, BigNumberish, ethers } from "ethers";
+import {
+  ethers,
+  dataSlice,
+  BigNumberish,
+  hexlify,
+  randomBytes,
+  getBytes
+} from "ethers";
 import {
   IUserOperationBuilder,
   ISendUserOperationOpts,
@@ -20,54 +27,39 @@ import {
   IConnectAccountResponse,
   IInitCodeRequest,
   IClientConfig,
+  EntryPointMinimalABI
 } from "./types";
-import { LogLevel, Logger, OpToJSON, signEIP712Transaction } from "./utils";
+import { LogLevel, Logger, OpToJSON } from "./utils";
 import { UserOperationMiddlewareCtx } from "./context";
 import { EntryPointAddress } from "./constants";
 import { BundlerJsonRpcProvider } from "./provider";
 import { BackendCaller } from "./backendCaller";
-import {
-  solidityKeccak256,
-  solidityPack,
-  arrayify,
-  hexDataSlice,
-} from "ethers/lib/utils";
 import WebSocket from "isomorphic-ws";
 
+import { IndidModule, ModuleType, ModuleVersion, StorageType } from "./module";
+import { AccountVersion, IndidAccount } from "./account";
 import {
   DEFAULT_PRE_VERIFICATION_GAS,
   DEFAULT_VERIFICATION_GAS_LIMIT,
   UserOperationBuilder,
 } from "./builder";
 
-import {
-  EnterpriseModule__factory,
-  ERC20__factory,
-  EntryPoint,
-  EntryPoint__factory,
-  SimpleAccount__factory,
-  UsersModule__factory,
-} from "@indid/indid-typechains";
-
 import { ec as EC } from "elliptic";
 import * as crypto from "crypto";
+import { IndidSigner } from "./signer";
 
 export class Client {
   public provider?: BundlerJsonRpcProvider;
   public backendCaller: BackendCaller;
-  public signer?: ethers.providers.JsonRpcSigner | ethers.Wallet | any;
-  public entryPointAddress: string;
-  public accountAddress: string;
-  public moduleAddress: string;
-  public factoryAddress: string;
-  public guardiansHash: ethers.utils.BytesLike;
-  public guardianStructId: ethers.utils.BytesLike;
-  public storageType: string;
-  public moduleType: string;
-  public guardians: string[];
 
-  public entryPoint: EntryPoint;
+  public entryPointAddress: string;
+  // public guardiansHash: ethers.BytesLike;
+  // public guardianStructId: ethers.BytesLike;
+  // public guardians: string[];
+
+  public entryPoint: ethers.Contract;
   public chainId: BigNumberish;
+  public account: IndidAccount;
 
   protected constructor(config: IClientConfig) {
     // if (config.overrideBundlerRpc) {
@@ -85,16 +77,9 @@ export class Client {
     );
 
     this.entryPointAddress = "0x";
-    this.accountAddress = "0x";
-    this.moduleAddress = "0x";
-    this.factoryAddress = "0x";
-    this.guardiansHash = "0x";
-    this.guardianStructId = "0x";
-    this.storageType = "";
-    this.moduleType = "";
-    this.guardians = [];
     this.chainId = 0;
     this.entryPoint = "0x" as any;
+    this.account = "0x" as any;
   }
 
   public static async init(config: IClientConfig) {
@@ -110,13 +95,14 @@ export class Client {
       instance.provider = new BundlerJsonRpcProvider(config.rpcUrl);
       instance.chainId = await instance.provider
         .getNetwork()
-        .then((network) => ethers.BigNumber.from(network.chainId));
+        .then((network) => BigInt(network.chainId));
 
       //This line of code is setting entryPointAddress based on the first truthy value found among the following, in order:
       instance.entryPointAddress = config.overrideEntryPoint || EntryPointAddress[Number(instance.chainId)] || EntryPointAddress[137];
 
-      instance.entryPoint = EntryPoint__factory.connect(
+      instance.entryPoint = new ethers.Contract(
         instance.entryPointAddress,
+        EntryPointMinimalABI,
         instance.provider
       );
     }
@@ -140,36 +126,18 @@ export class Client {
     Logger.getInstance().debug(`EntryPointAddress: ${instance.entryPointAddress}`);
     Logger.getInstance().debug(`Backend url: ${instance.backendCaller.backendUrl}`);
 
-    const response = await instance.backendCaller.retrieveSdkDefaults(instance.chainId);
-
-    if (response.error) {
-      throw new Error(response.error);
-    }
-    else {
-
-      instance.moduleAddress = response._module;
-      instance.factoryAddress = response.factoryAddress;
-      instance.storageType = response.storageType;
-      instance.guardians = response._guardians;
-      if (instance.storageType === "standard") {
-        instance.guardiansHash = response._guardiansHash;
-      }
-      if (instance.storageType === "shared") {
-        instance.guardianStructId = response._guardianId;
-      }
-      instance.moduleType = response.moduleType;
-    }
   }
 
   public async connectProvider(rpcUrl: string) {
     this.provider = new BundlerJsonRpcProvider(rpcUrl);
-    this.entryPoint = EntryPoint__factory.connect(
+    this.entryPoint = new ethers.Contract(
       this.entryPointAddress,
+      EntryPointMinimalABI,
       this.provider
     );
     this.chainId = await this.provider
       .getNetwork()
-      .then((network) => ethers.BigNumber.from(network.chainId));
+      .then((network) => BigInt(network.chainId));
 
     Logger.getInstance().debug("connectProvider has set the chainId to: ", this.chainId);
   }
@@ -215,21 +183,17 @@ export class Client {
       throw new Error("Provider has not been connected, please use the connectProvider function");
     }
     if (accountAddress === undefined) {
-      if (this.accountAddress === "0x") {
+      if (this.account.address === "0x") {
         return {
           nonce: "",
           error:
             "No account address available, provide one or connect a smart contract account first",
         };
       }
-      accountAddress = this.accountAddress;
+      accountAddress = this.account.address;
     }
 
-    const account = SimpleAccount__factory.connect(
-      accountAddress,
-      this.provider
-    );
-    return { nonce: await account.getNonce() };
+    return { nonce: await this.entryPoint.getNonce(accountAddress) };
   }
 
 
@@ -240,34 +204,27 @@ export class Client {
       throw new Error("Provider has not been connected, please use the connectProvider function");
     }
     if (accountAddress === undefined) {
-      if (this.accountAddress === "0x") {
+      if (this.account.address === "0x") {
         return {
           nonce: "",
           error:
             "No account address available, provide one or connect a smart contract account first",
         };
       }
-      accountAddress = this.accountAddress;
+      accountAddress = this.account.address;
     }
 
-    const entryPoint = EntryPoint__factory.connect(
-      this.entryPointAddress,
-      this.provider
-    );
-
     //generate 192 random bits for the key
-    const key = ethers.utils.hexlify(ethers.utils.randomBytes(24));
+    const key = hexlify(randomBytes(24));
 
-    return { nonce: await entryPoint.getNonce(this.accountAddress, key) };
+    return { nonce: await this.entryPoint.getNonce(this.account.address, key) };
   }
 
   public async connectAccount(
-    signer: ethers.Wallet | ethers.providers.JsonRpcSigner,
+    signer: IndidSigner,
     accountAddress: string,
     opts?: IConnectAccountOpts
   ): Promise<IConnectAccountResponse> {
-    this.signer = signer;
-    this.accountAddress = accountAddress;
     if (this.chainId === 0 && opts?.chainId === undefined) {
       return {
         error: "No chainId provided, either pass chainId in options or connect to a provider",
@@ -276,10 +233,20 @@ export class Client {
     let chainId = opts?.chainId || this.chainId;
 
     if (opts != null) {
-      this.moduleAddress = opts.moduleAddress;
-      this.moduleType = opts.moduleType;
-      this.storageType = opts.storageType;
-      this.factoryAddress = opts.factoryAddress;
+      const module = new IndidModule(
+        opts.moduleAddress,
+        opts.moduleType as ModuleType,
+        opts.storageType as StorageType,
+        opts.moduleVersion as ModuleVersion
+      );
+      //TODO: owners and ownersHash should probably be passed here
+      this.account = new IndidAccount({
+        signer: signer,
+        version: opts.accountVersion as AccountVersion,
+        address: accountAddress,
+        module: module,
+        factoryAddress: opts.factoryAddress
+      });
       //TODO: factoryAddress is only useful is the account is a counterfactual
       // this.guardians = opts.guardians;
       // this.guardiansHash = opts.guardiansHash;
@@ -289,10 +256,20 @@ export class Client {
     else {
       const response = await this.backendCaller.getAccountInfo({ accountAddress: accountAddress, chainId: chainId.toString() });
       Logger.getInstance().debug("response backend caller getAccountInfo: ", response);
-      this.moduleAddress = response.moduleAddress;
-      this.moduleType = response.moduleType;
-      this.storageType = response.storageType;
-      this.factoryAddress = response.factoryAddress;
+      //TODO: check that response.owners should contain the signer address
+      const module = new IndidModule(
+        response.moduleAddress,
+        response.moduleType as ModuleType,
+        response.storageType as StorageType,
+        response.moduleVersion as ModuleVersion
+      );
+      this.account = new IndidAccount({
+        signer: signer,
+        version: response.accountVersion as AccountVersion,
+        address: accountAddress,
+        module: module,
+        factoryAddress: response.factoryAddress
+      });
       // this.guardians = response.guardians;
       // this.guardiansHash = response.guardiansHash;
       // this.guardianStructId = response.guardianStructId;
@@ -304,104 +281,26 @@ export class Client {
   }
 
   public async prepareSendTransactions(
-    to: string[],
-    value: BigNumberish[],
-    calldata: string[],
+    transactions: ICall[],
     opts?: IUserOperationOptions
   ): Promise<IUserOperationBuilder> {
-    if (!this.provider) {
-      throw new Error("Provider has not been connected, please use the connectProvider function");
-    }
-    const transactions: ICall[] = [];
-    for (let i = 0; i < to.length; i++) {
-      transactions.push({
-        to: to[i],
-        value: value[i],
-        data: calldata[i],
-      });
-    }
+    //TODO: check that signer or account address is set
 
+    Logger.getInstance().debug("moduleType: ", this.account.module.moduleType);
 
-
-    const account = SimpleAccount__factory.connect(
-      this.accountAddress,
-      this.provider
+    const calldataMulticall = this.account.module.getCalldataMulticall(
+      this.account.address,
+      transactions,
+      opts?.doNotRevertOnTxFailure
     );
 
-    Logger.getInstance().debug("moduleType: ", this.moduleType);
-    let module;
-    let multiCallGasEstimated;
-    if (this.moduleType === "enterprise") {
-      module = EnterpriseModule__factory.connect(
-        this.moduleAddress,
-        this.provider
-      );
-    } else if (this.moduleType === "users") {
-      module = UsersModule__factory.connect(this.moduleAddress, this.provider);
-    }
-
-    else {
-      throw new Error("Invalid module type");
-    }
-
-    const calldataMulticall = (
-      await module!.populateTransaction[
-        opts?.doNotRevertOnTxFailure ? "multiCallNoRevert" : "multiCall"
-      ](this.accountAddress, transactions)
-    ).data!;
-
-    if (opts?.initCode === undefined && opts?.callGasLimit === undefined) {
-      let totalGasEstimated = BigNumber.from(0);
-      for (let i = 0; i < transactions.length; i++) {
-        const gasEstimated = await this.provider.estimateGas({
-          from: this.accountAddress,
-          to: to[i],
-          data: calldata[i],
-          value: value[i],
-        });
-
-        totalGasEstimated = totalGasEstimated.add(gasEstimated);
-        Logger.getInstance().debug(
-          "inner transaction gasEstimated for tx: ",
-          i,
-          gasEstimated.toString()
-        );
-      }
-
-      Logger.getInstance().debug(
-        "total inner transactions estimated gas:",
-        totalGasEstimated.toString()
-      );
-
-      multiCallGasEstimated = await this.provider.estimateGas({
-        from: this.moduleAddress,
-        to: this.moduleAddress,
-        data: calldataMulticall,
-      });
-
-      Logger.getInstance().debug(
-        "multicall transaction gasEstimated",
-        multiCallGasEstimated.toString()
-      );
-    }
-
-    const currentTime = Math.round(new Date().getTime() / 1000);
-    const deadline = currentTime + (opts?.deadlineSeconds || 60 * 60);
-    const nonce = ethers.utils.hexlify(ethers.utils.randomBytes(32));
-
-    const calldataOp = (
-      await account.populateTransaction.invokeModule(
-        this.moduleAddress,
-        calldataMulticall,
-        nonce,
-        deadline,
-        "0x"
-      )
-    ).data!;
+    const calldataOp = this.account.getInvokeModuleCalldata(
+      this.account.module.address,
+      calldataMulticall
+    );
 
     let builder = await this.fillUserOperation(
       calldataOp,
-      multiCallGasEstimated,
       opts
     );
 
@@ -416,39 +315,29 @@ export class Client {
     if (!this.provider) {
       throw new Error("Provider has not been connected, please use the connectProvider function");
     }
-    if (this.signer === undefined) {
+    if (this.account.signer === undefined) {
       throw new Error("No signer available, create or connect account first");
     }
-    if (this.moduleType !== "enterprise") {
+    if (this.account.module.moduleType !== "enterprise") {
       throw new Error("Only enterprise module is supported");
     }
 
-    const module = EnterpriseModule__factory.connect(
-      this.moduleAddress,
-      this.signer
-    );
 
-    const calldataRecovery = (
-      await module.populateTransaction.transferOwnership(
-        accountAddress,
-        newOwner
-      )
-    ).data!;
+    const calldataRecovery = this.account.module.getCalldataTransferOwnership(accountAddress, newOwner);
 
     const deadline = Date.now() + (opts?.deadlineSeconds || 60 * 60);
-    let { signature, nonce } = await signEIP712Transaction(
+    let { signature, nonce } = await this.account.signer.signEIP712Transaction(
       accountAddress,
-      this.moduleAddress,
+      this.account.module.address,
       calldataRecovery,
       deadline,
-      this.chainId,
-      [this.signer]
+      this.chainId
     );
 
     const builder = await this.prepareSendModuleOperation(
       calldataRecovery,
       nonce,
-      deadline.toString(),
+      deadline,
       signature,
       opts
     );
@@ -458,138 +347,164 @@ export class Client {
   public async prepareSendModuleOperation(
     calldata: string,
     nonce: string,
-    deadline: string,
+    deadline: number,
     signatures: string,
     opts?: IUserOperationOptions
   ): Promise<IUserOperationBuilder> {
-    if (!this.provider) {
-      throw new Error("Provider has not been connected, please use the connectProvider function");
-    }
-    const account = SimpleAccount__factory.connect(
-      this.accountAddress,
-      this.provider
-    );
-
     let sigs = "0x";
     if (signatures !== undefined) {
       sigs = signatures;
     }
 
-    const calldataOp = (
-      await account.populateTransaction.invokeModule(
-        this.moduleAddress,
-        calldata,
-        nonce,
-        deadline,
-        sigs
-      )
-    ).data!;
+    const calldataOp = this.account.getInvokeModuleCalldata(
+      this.account.module.address,
+      calldata,
+      nonce,
+      deadline,
+      sigs
+    );
 
-    let builder = await this.fillUserOperation(calldataOp, undefined, opts);
+    let builder = await this.fillUserOperation(calldataOp, opts);
 
     return builder;
   }
 
+
+  //TODO: the owner should be passed prefixed, is this ok?
   public async getInitCode(
     owner?: string,
     salt: string = "0",
     opts?: ICreateAccountOpts
   ): Promise<IInitCodeResponse> {
-    if (this.accountAddress !== "0x") {
-
-      const response = await this.backendCaller.getAccountInfo({ accountAddress: this.accountAddress, chainId: this.chainId.toString() })
-
+    // If account already exists, fetch its init code from backend
+    if (this.account.address !== "0x") {
+      const response = await this.backendCaller.getAccountInfo({
+        accountAddress: this.account.address, 
+        chainId: this.chainId.toString()
+      });
       return { initCode: response.initCode, error: response.error };
     }
 
-
+    // Handle case when owner address is not provided
     if (owner === undefined) {
-      if (this.signer === undefined) {
+      if (!this.account.signer) {
         return {
           initCode: "",
           error: "No signer available, provide owner address",
         };
-      } else {
-        owner = await this.signer.getAddress();
-        if (owner === undefined) {
-          return {
-            initCode: "",
-            error:
-              "Unable to retrieve signer address, signer might not have getAddress method, please provide owner address",
-          };
-        }
+      }
+      
+      try {
+        owner = await this.account.signer.getAddress();
+      } catch (error) {
+        return {
+          initCode: "",
+          error: "Unable to retrieve signer address, please provide owner address",
+        };
+      }
+      
+      if (!owner) {
+        return {
+          initCode: "",
+          error: "Unable to retrieve signer address, please provide owner address",
+        };
       }
     }
 
-    let config = { ...opts };
-
-    if (opts == null) {
-
-      config.factoryAddress = this.factoryAddress;
-      config.moduleAddress = this.moduleAddress;
-      config.guardians = this.guardians;
-      config.moduleType = this.moduleType;
-      config.storageType = this.storageType;
-    }
+    // Set up configuration using options or defaults from account
+    const config: ICreateAccountOpts = opts ? { ...opts } : {
+      factoryAddress: this.account.factoryAddress,
+      moduleAddress: this.account.module.address,
+      guardians: this.account.guardians,
+      moduleType: this.account.module.moduleType,
+      storageType: this.account.module.storageType
+    };
+    
+    const storageType = config.storageType;
 
     let requestData: IInitCodeRequest;
 
-    if (config.storageType === "standard") {
-      if (opts != null) {
-        if (opts.guardiansHash !== undefined) {
-          config.guardiansHash = opts.guardiansHash;
-        } else if (opts.guardians !== undefined) {
-          const packedGuardiansArray = solidityPack(
+
+    //TODO: revisit storage handling
+    // Handle standard storage type
+    if (storageType === "standard") {
+      // Determine guardians hash
+      if (opts?.guardiansHash) {
+        config.guardiansHash = opts.guardiansHash;
+      } else if (opts?.guardians) {
+        // Pack and hash guardians using ethers v6 methods
+        const packedGuardiansArray = ethers.solidityPacked(
+          ["address[]"],
+          [opts.guardians]
+        );
+        config.guardiansHash = ethers.keccak256(packedGuardiansArray);
+      } else if (!opts && this.account.module) {
+        // Try to use guards hash from account module
+        const guardians = this.account.guardians;
+        if (guardians && guardians.length > 0) {
+          const packedGuardiansArray = ethers.solidityPacked(
             ["address[]"],
-            this.guardians
+            [guardians]
           );
-          config.guardiansHash = solidityKeccak256(
-            ["bytes"],
-            [packedGuardiansArray]
-          );
+          config.guardiansHash = ethers.keccak256(packedGuardiansArray);
         } else {
           return {
             initCode: "",
-            error: "No guardiansHash or guardians provided",
+            error: "No guardians available in account",
           };
         }
       } else {
-        config.guardiansHash = this.guardiansHash;
+        return {
+          initCode: "",
+          error: "No guardiansHash or guardians provided",
+        };
       }
+
       requestData = {
-        owner: owner!,
+        owner: owner,
         factoryAddress: config.factoryAddress,
         guardiansHash: config.guardiansHash,
         moduleAddress: config.moduleAddress,
         salt: salt,
         chainId: this.chainId,
       };
-
-    } else if (this.storageType === "shared") {
-      if (opts != null) {
-        if (opts.guardianStructId === undefined) {
-          return { initCode: "", error: "No guardianStructId provided" };
-        }
-        config.guardianStructId = opts.guardianStructId;
+    } 
+    // Handle shared storage type
+    else if (storageType === "shared") {
+      if (opts?.beaconId) {
+        config.beaconId = opts.beaconId;
+      } else if (!opts && this.account.beaconId) {
+        config.beaconId = this.account.beaconId;
       } else {
-        config.guardianStructId = this.guardianStructId;
+        return { 
+          initCode: "", 
+          error: "No beaconId provided" 
+        };
       }
+
       requestData = {
-        owner: owner!,
+        owner: owner,
         factoryAddress: config.factoryAddress,
-        guardianId: config.guardianStructId,
+        guardianId: config.beaconId,
         moduleAddress: config.moduleAddress,
         salt: salt,
         chainId: this.chainId,
       };
-
-    } else {
-      return { initCode: "", error: "Invalid storage type" };
+    } 
+    // Handle invalid storage type
+    else {
+      return { 
+        initCode: "", 
+        error: "Invalid storage type" 
+      };
     }
-    //TODO: if the owner/salt combo already exist in the db all other request data is ignored by the backend
-    const response = await this.backendCaller.retrieveInitCode(requestData);
-    return { initCode: response.initCode, error: response.error };
 
+    // Call backend to retrieve init code
+    const response = await this.backendCaller.retrieveInitCode(requestData);
+    return { 
+      initCode: response.initCode, 
+      error: response.error 
+    };
   }
 
   public async sendUserOperation(
@@ -614,18 +529,11 @@ export class Client {
     amount: BigNumberish,
     opts?: IUserOperationOptions
   ): Promise<IUserOperationBuilder> {
-    if (this.signer === undefined) {
-      throw new Error("No signer available, create or connect account first");
-    }
-
-    const builder = await this.prepareSendTransactions(
-      [recipientAddress],
-      [amount],
-      ["0x"],
+    return (await this.prepareSendTransactions(
+      [{ to: recipientAddress, value: amount, data: "0x" }],
       opts
-    );
+    ));
 
-    return builder;
   }
 
   public async prepareSendERC20(
@@ -634,26 +542,18 @@ export class Client {
     amount: BigNumberish,
     opts?: IUserOperationOptions
   ): Promise<IUserOperationBuilder> {
-    if (!this.provider) {
-      throw new Error("Provider has not been connected, please use the connectProvider function");
-    }
-    if (this.signer === undefined) {
-      throw new Error("No signer available, create or connect account first");
-    }
+    const erc20Interface = new ethers.Interface([
+      "function transfer(address to, uint256 amount) returns (bool)"
+    ]);
+    const calldata = erc20Interface.encodeFunctionData("transfer", [
+      recipientAddress,
+      amount
+    ]);
 
-    const erc20 = ERC20__factory.connect(contractAddress, this.provider);
-    const calldata = (
-      await erc20.populateTransaction.transfer(recipientAddress, amount)
-    ).data!;
-
-    const builder = await this.prepareSendTransactions(
-      [contractAddress],
-      [0],
-      [calldata],
+    return (await this.prepareSendTransactions(
+      [{ to: contractAddress, value: 0, data: calldata }],
       opts
-    );
-
-    return builder;
+    ));
   }
 
   public async waitOP(
@@ -750,46 +650,43 @@ export class Client {
   }
 
   async buildUserOperation(builder: IUserOperationBuilder) {
-    return builder.buildOp(this.entryPoint.address, this.chainId);
+    return builder.buildOp(await this.entryPoint.getAddress(), this.chainId);
   }
 
   async fillUserOperation(
     callData: string,
-    multiCallGasEstimated?: BigNumber,
     opts?: IUserOperationOptions
   ): Promise<UserOperationBuilder> {
+    //TODO: all the gas part should be rewritten to use the native estimateGas from the bundler
     if (!this.provider) {
+      //TODO: the provider is only needed for the sequential nonce if we use the bundler for the estimateGas
       throw new Error("Provider has not been connected, please use the connectProvider function");
     }
     let builder = new UserOperationBuilder();
-    builder.setSender(this.accountAddress);
+    builder.setSender(this.account.address);
     builder.setCallData(callData);
     let verificationGasLimit = DEFAULT_VERIFICATION_GAS_LIMIT;
-    let callGasLimit = ethers.constants.Zero;
+    let callGasLimit = BigInt(0);
 
     if (opts?.initCode !== undefined) {
       builder.setInitCode(opts.initCode);
-      builder.setNonce(ethers.BigNumber.from(0));
-      const factoryAddr = hexDataSlice(opts.initCode, 0, 20);
-      const initCallData = hexDataSlice(opts.initCode, 20);
+      builder.setNonce(0);
+      const factoryAddr = dataSlice(opts.initCode, 0, 20);
+      const initCallData = dataSlice(opts.initCode, 20);
 
       const initEstimate = await this.provider.estimateGas({
-        from: this.entryPoint.address,
+        from: await this.entryPoint.getAddress(),
         to: factoryAddr,
         data: initCallData,
         gasLimit: 10e6,
       });
 
-      verificationGasLimit = verificationGasLimit.add(initEstimate);
+      verificationGasLimit = verificationGasLimit + initEstimate;
 
       //GAS: adding a flat 1e6 gas to the callGasLimit because the estimate when using initCode is not always accurate
-      callGasLimit = callGasLimit.add(1e6);
+      callGasLimit = callGasLimit + BigInt(1e6);
     } else {
       //No init code case
-      const account = SimpleAccount__factory.connect(
-        this.accountAddress,
-        this.signer!
-      );
       let internalNonce;
       if (opts?.nonceOP !== undefined) {
         internalNonce = opts.nonceOP;
@@ -799,24 +696,16 @@ export class Client {
       builder.setNonce(internalNonce);
       Logger.getInstance().debug("nonceSDK inside fillUserOperation", internalNonce);
 
+      //TODO: this should change depending on the curve, 
+      //specifically if the precompile is used or not
       verificationGasLimit = DEFAULT_VERIFICATION_GAS_LIMIT;
       if (opts?.callGasLimit === undefined) {
-        const gasEstimated = await this.provider.estimateGas({
-          from: this.entryPoint.address,
-          to: this.accountAddress,
-          data: callData,
-        });
-        Logger.getInstance().debug("outer gasEstimated", gasEstimated.toString());
-        if (
-          multiCallGasEstimated !== undefined &&
-          multiCallGasEstimated.gt(gasEstimated)
-        ) {
-          callGasLimit = multiCallGasEstimated;
-        } else {
-          callGasLimit = gasEstimated;
-        }
-        //GAS: adding a flat 5e5 gas to the callGasLimit because the estimate is not always accurate
-        callGasLimit = callGasLimit.add(5e5);
+        // callGasLimit = await this.provider.estimateGas({
+        //   from: await this.entryPoint.getAddress(),
+        //   to: this.accountAddress,
+        //   data: callData,
+        // });
+        callGasLimit = BigInt(1e6)//TODO: get gaslimit from bundler through backend
       }
     }
 
@@ -838,10 +727,10 @@ export class Client {
     if (opts?.maxFeePerGas) {
       builder.setMaxFeePerGas(opts.maxFeePerGas);
     } else {
-      if (builder.getMaxFeePerGas() == ethers.constants.Zero) {
+      if (builder.getMaxFeePerGas() == BigInt(0)) {
         const block = await this.provider.getBlock("latest");
         builder.setMaxFeePerGas(
-          block.baseFeePerGas!.add(builder.getMaxPriorityFeePerGas())
+          block?.baseFeePerGas! + BigInt(builder.getMaxPriorityFeePerGas())
         );
       }
     }
@@ -849,16 +738,16 @@ export class Client {
       builder.setMaxPriorityFeePerGas(opts.maxPriorityFeePerGas);
     }
 
-    if (builder.getMaxFeePerGas() == ethers.constants.Zero) {
+    if (builder.getMaxFeePerGas() == BigInt(0)) {
       const block = await this.provider.getBlock("latest");
       Logger.getInstance().debug(
         "block.baseFeePerGas",
-        Number(block.baseFeePerGas!.toString())
+        Number(block?.baseFeePerGas?.toString() ?? "0")
       );
 
       Logger.getInstance().debug("maxPriorityFeePerGas", builder.getMaxPriorityFeePerGas());
       builder.setMaxFeePerGas(
-        block.baseFeePerGas!.add(builder.getMaxPriorityFeePerGas())
+        block?.baseFeePerGas! + BigInt(builder.getMaxPriorityFeePerGas())
       );
     }
 
@@ -875,7 +764,7 @@ export class Client {
     const chainId = await this.provider.getNetwork().then((net) => net.chainId);
     const message = new UserOperationMiddlewareCtx(
       op,
-      this.entryPoint.address,
+      await this.entryPoint.getAddress(),
       chainId
     ).getUserOpHash();
     return { userOpHash: message };
@@ -887,7 +776,7 @@ export class Client {
     if (!this.provider) {
       throw new Error("Provider has not been connected, please use the connectProvider function");
     }
-    if (this.signer === undefined) {
+    if (this.account.signer === undefined) {
       return {
         signature: "",
         userOpHash: "",
@@ -898,11 +787,11 @@ export class Client {
     const chainId = await this.provider.getNetwork().then((net) => net.chainId);
     const message = new UserOperationMiddlewareCtx(
       op,
-      this.entryPoint.address,
+      await this.entryPoint.getAddress(),
       chainId
     ).getUserOpHash();
 
-    const signature = await this.signer!.signMessage(arrayify(message));
+    const signature = await this.account.signer.signMessage(getBytes(message));
 
     builder.setSignature(signature);
     return {
@@ -927,12 +816,12 @@ export class Client {
     const userOpHash = dryRun
       ? new UserOperationMiddlewareCtx(
         op,
-        this.entryPoint.address,
+        await this.entryPoint.getAddress(),
         this.chainId
       ).getUserOpHash()
       : ((await this.provider.send("eth_sendUserOperation", [
         OpToJSON(op),
-        this.entryPoint.address,
+        await this.entryPoint.getAddress(),
       ])) as string);
     builder.resetOp();
 
@@ -947,7 +836,7 @@ export class Client {
         while (Date.now() < end) {
           const events = await this.entryPoint.queryFilter(
             this.entryPoint.filters.UserOperationEvent(userOpHash),
-            Math.max(0, block.number - 100)
+            Math.max(0, block?.number! - 100)
           );
           if (events.length > 0) {
             return events[0];
@@ -964,6 +853,7 @@ export class Client {
     req: IWebHookSignatureRequest,
     verifyingKey?: string
   ): boolean {
+    //TODO: maybe add log level to the static methods params
     const curve = new EC("secp256k1");
 
     const computedMsgBodyHash = crypto
@@ -980,15 +870,14 @@ export class Client {
       return false;
     }
 
-    //FIXME: add "changed default webhook key to prod key" to the commit message
     // Use verifyingKey if it's provided, otherwise use the default key
     const publicKey = curve.keyFromPublic(
       verifyingKey
         ? verifyingKey
         //prod key
         : "04e450bafe7e0772618749f7dcb1c941a62454103bcb11741d22125099e6f4cf7094fc2f40eab745c578f51e21b32683e1a285f9806c86929c92a98fbd50c96d71",
-        //dev key
-        // : "041294b0d86c27e213d1678b2fe8c7a4296971c16671004596e59dcf13f9c940995a67a0b928a875dcb615cdc28048ae95e11a516a6caac35f0ef65c328d4d7f60",
+      //dev key
+      // : "041294b0d86c27e213d1678b2fe8c7a4296971c16671004596e59dcf13f9c940995a67a0b928a875dcb615cdc28048ae95e11a516a6caac35f0ef65c328d4d7f60",
       "hex"
     );
     const outcome = publicKey.verify(hash, req.headers.signature);

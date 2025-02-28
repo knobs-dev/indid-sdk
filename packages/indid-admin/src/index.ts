@@ -7,21 +7,21 @@ import {
   ICreateAccountOpts,
   IUserOpSponsorshipResponse,
   IWebHookRequest,
-  signEIP712Transaction,
   IRecoverAccountResponse,
   TaskUserOperationStatus,
   IDelegatedTransactionOptions,
   ISendDelegatedTransactionsResponse,
   ICall,
   Logger,
-  LogLevel,
-  IClientConfig
+  LogLevel, 
+  IClientConfig,
+  IndidSigner,
+  SignerKind,
+  IRetrieveSdkDefaultsResponse
 } from "@indid/indid-core-sdk";
-import {
-  EnterpriseModule__factory, UsersModule__factory,
-} from "@indid/indid-typechains";
-import { BigNumberish, ethers } from "ethers";
-import { Interface } from "ethers/lib/utils";
+import { IndidModule, ModuleType, ModuleVersion, StorageType } from "@indid/indid-core-sdk/dist/module";
+import { ethers } from "ethers";
+
 
 class AdminClient extends Client {
   private constructor(config: IClientConfig) {
@@ -42,13 +42,16 @@ class AdminClient extends Client {
     opts?: ICreateAccountOpts
   ): Promise<ICreateAccountResponse> {
     let config = { ...opts };
+    let defaultsResponse: IRetrieveSdkDefaultsResponse;
+    defaultsResponse = await this.backendCaller.retrieveSdkDefaults(this.chainId);
 
     if (opts == null) {
-      config.factoryAddress = this.factoryAddress;
-      config.moduleAddress = this.moduleAddress;
-      config.guardians = this.guardians;
-      config.moduleType = this.moduleType;
-      config.storageType = this.storageType;
+      config.factoryAddress = defaultsResponse.factoryAddress;
+      config.moduleAddress = defaultsResponse._module;
+      config.guardians = defaultsResponse._guardians;
+      config.beaconId = defaultsResponse._guardianId;
+      config.moduleType = defaultsResponse.moduleType;
+      config.storageType = defaultsResponse.storageType;
     }
 
     let response: ICreateAccountResponse;
@@ -66,23 +69,23 @@ class AdminClient extends Client {
       });
     } else if (config.storageType === "shared") {
       if (opts != null) {
-        if (opts.guardianStructId === undefined) {
+        if (opts.beaconId === undefined) {
           return {
             accountAddress: "",
             taskId: "",
-            error: "No guardianStructId provided",
+            error: "No beaconId provided",
           };
         }
-        config.guardianStructId = opts.guardianStructId;
+        config.beaconId = opts.beaconId;
       } else {
-        config.guardianStructId = this.guardianStructId;
+        config.beaconId = defaultsResponse._guardianId;
       }
       response = await this.backendCaller.backendCreateAccount({
         factoryAddress: config.factoryAddress,
         chainId: this.chainId.toString(),
         owner: owner,
         _module: config.moduleAddress,
-        _guardianId: config.guardianStructId,
+        _guardianId: config.beaconId,
         salt: salt,
         webhookData,
       });
@@ -98,31 +101,17 @@ class AdminClient extends Client {
   }
 
   public async createAndConnectAccount(
-    signer?: ethers.Signer,
+    signer: IndidSigner,
     salt: string = "0",
     webhookData?: IWebHookRequest,
     opts?: ICreateAccountOpts
   ): Promise<ICreateAndConnectAccountResponse> {
+    //TODO: the signer should create a new onwer on either curve
     if (!this.provider) {
       throw new Error("Provider has not been connected, please use the connectProvider function");
     }
-    let seed: string | undefined;
-    if (signer == undefined && this.signer !== undefined) {
-      const wallet = ethers.Wallet.createRandom();
-      const seed = wallet.mnemonic.phrase;
-      const path = "m/44'/60'/0'/0/0"; 
-      const signer = ethers.Wallet.fromMnemonic(seed, path).connect(
-        this.provider
-      );
-      this.signer = signer;
-    }
-
-    if (signer !== undefined) {
-      this.signer = signer;
-    }
-
     const response = await this.createAccount(
-      await this.signer!.getAddress(),
+      await signer.getAddress(),
       salt,
       webhookData,
       opts
@@ -131,26 +120,23 @@ class AdminClient extends Client {
       return {
         accountAddress: "",
         taskId: "",
-        seed,
         error: response.error,
       };
     }
     const taskResponse = await this.waitTask(response.taskId);
-    if(taskResponse.operationStatus !== TaskUserOperationStatus.EXECUTED){
+    if (taskResponse.operationStatus !== TaskUserOperationStatus.EXECUTED) {
       return {
         accountAddress: "",
         taskId: "",
-        seed,
         error: taskResponse.operationStatus + taskResponse.reason,
       };
     }
 
-    this.connectAccount(this.signer, response.accountAddress);
+    this.connectAccount(signer, response.accountAddress);
 
     return {
       accountAddress: response.accountAddress,
       taskId: response.taskId,
-      seed,
       error: response.error,
     };
   }
@@ -176,34 +162,33 @@ class AdminClient extends Client {
   public async recoverEnterpriseAccount(
     accountAddress: string,
     newOwner: string,
-    guardianSigner: ethers.Wallet | ethers.providers.JsonRpcSigner,
+    guardianSigner: IndidSigner,
     webhookData?: IWebHookRequest
   ): Promise<IRecoverAccountResponse> {
+    //TODO: is this check needed? the provider here is used to get the chainId
     if (!this.provider) {
       throw new Error("Provider has not been connected, please use the connectProvider function");
     }
-    const moduleK = EnterpriseModule__factory.connect(
-      this.moduleAddress,
-      this.provider
+
+    //get account info
+    const accountInfoResponse = await this.backendCaller.getAccountInfo({ accountAddress: accountAddress, chainId: this.chainId.toString() });
+    const module = new IndidModule(
+      accountInfoResponse.moduleAddress,
+      accountInfoResponse.moduleType as ModuleType,
+      accountInfoResponse.storageType as StorageType,
+      accountInfoResponse.moduleVersion as ModuleVersion
     );
 
-    Logger.getInstance().debug(
-      "account guardians",
-      await moduleK.getGuardians(accountAddress)
-    );
 
-    const calldata = moduleK.interface.encodeFunctionData("transferOwnership", [
-      accountAddress,
-      newOwner,
-    ]);
+    const calldata = module.getCalldataTransferOwnership(accountAddress, newOwner);
     const deadline = Date.now() + 2000;
-    let { signature, nonce } = await signEIP712Transaction(
+    let { signature, nonce } = await guardianSigner.signEIP712Transaction(
       accountAddress,
-      moduleK.address,
+      module.address,
       calldata,
       deadline,
       this.chainId,
-      [guardianSigner as ethers.Wallet]
+      SignerKind.Guardian
     );
 
     const response = await this.backendCaller.backendRecoverAccount({
@@ -229,60 +214,35 @@ class AdminClient extends Client {
   ): Promise<ISendDelegatedTransactionsResponse> {
     let chainId = opts?.chainId || this.chainId;
     if (chainId === undefined || chainId === 0) {
-     return {
-      taskId: "",
-      error: "No chainId provided, either pass chainId in options or connect to a provider",
-     }
+      return {
+        taskId: "",
+        error: "No chainId provided, either pass chainId in options or connect to a provider",
+      }
     }
-    if (this.signer === undefined) {
-      throw new Error("No signer available, create or connect account first");
-    }
-
-    let abi;
-    if (this.moduleType === "enterprise") {
-      abi = EnterpriseModule__factory.abi;
-    } else if (this.moduleType === "users") {
-      abi = UsersModule__factory.abi;
-    } else {
-      throw new Error("Invalid module type");
+    if (this.account === undefined) {
+      throw new Error("No account available, create or connect account first");
     }
 
-    const moduleInterface = new Interface(abi);
-
-    const functionName = opts?.doNotRevertOnTxFailure ? "multiCallNoRevert" : "multiCall";
-    const calldataMulticall = moduleInterface.encodeFunctionData(
-      functionName,
-      [this.accountAddress, transactions]
+    const calldataMulticall = this.account.module.getCalldataMulticall(
+      this.account.address,
+      transactions
     );
 
     const currentTime = Math.round(new Date().getTime() / 1000);
     const deadline = currentTime + (opts?.deadlineSeconds || 60 * 60);
 
-    let { signature, nonce } = await signEIP712Transaction(
-      this.accountAddress,
-      this.moduleAddress,
+    let { signature, nonce } = await this.account.signer.signEIP712Transaction(
+      this.account.address,
+      this.account.module.address,
       calldataMulticall,
       deadline,
-      chainId,
-      [this.signer]
+      chainId
     );
 
-
-    // const executeCalldata = (await module!.populateTransaction.execute(
-    //   this.accountAddress,
-    //   calldataMulticall,
-    //   nonce,
-    //   deadline,
-    //   signature
-    // )).data!
-
-    //hash executeCalldata
-    // const executeCalldataHash = solidityKeccak256(["bytes"], [executeCalldata]);
-
     const response = await this.backendCaller.sendDelegatedTransactions({
-      accountAddress: this.accountAddress,
+      accountAddress: this.account.address,
       chainId: chainId.toString(),
-      moduleAddress: this.moduleAddress,
+      moduleAddress: this.account.module.address,
       data: calldataMulticall,
       nonce: nonce,
       deadline: deadline,
@@ -297,5 +257,5 @@ class AdminClient extends Client {
   }
 }
 
-export { AdminClient};
+export { AdminClient };
 export * from "@indid/indid-core-sdk";

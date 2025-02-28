@@ -1,8 +1,8 @@
 import { ethers } from "ethers";
 
 
-export class BundlerJsonRpcProvider extends ethers.providers.JsonRpcProvider {
-  private bundlerRpc?: ethers.providers.JsonRpcProvider;
+export class BundlerJsonRpcProvider extends ethers.JsonRpcProvider {
+  private bundlerRpc?: ethers.JsonRpcProvider;
   private bundlerMethods = new Set([
     "eth_sendUserOperation",
     "eth_estimateUserOperationGas",
@@ -13,7 +13,7 @@ export class BundlerJsonRpcProvider extends ethers.providers.JsonRpcProvider {
 
   setBundlerRpc(bundlerRpcInfo?: string): BundlerJsonRpcProvider {
     if (bundlerRpcInfo) {
-      this.bundlerRpc = new ethers.providers.JsonRpcProvider(bundlerRpcInfo);
+      this.bundlerRpc = new ethers.JsonRpcProvider(bundlerRpcInfo);
     }
     return this;
   }

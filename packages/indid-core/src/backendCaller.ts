@@ -25,6 +25,9 @@ import {
 import { BigNumberish } from "ethers";
 import { Logger } from "./utils";
 
+
+//TODO: update the interfaces to reflect the new and revisited backend apis
+
 export class BackendCaller {
   public backendUrl: string;
   public apiKey: string;
@@ -67,6 +70,7 @@ export class BackendCaller {
           _guardiansHash: "",
           _guardianId: "",
           storageType: "",
+          accountVersion: "",
           error: responseText,
         };
       }
@@ -83,6 +87,7 @@ export class BackendCaller {
         _guardiansHash: "",
         _guardianId: "",
         storageType: "",
+        accountVersion: "",
         error: `Fetch Error: ${error}`,
       };
     }
@@ -110,6 +115,8 @@ export class BackendCaller {
           moduleType: "",
           storageType: "",
           initCode: "",
+          accountVersion: "",
+          moduleVersion: "",
           error: responseText,
         };
       }
@@ -122,6 +129,8 @@ export class BackendCaller {
         moduleType: "",
         storageType: "",
         initCode: "",
+        accountVersion: "",
+        moduleVersion: "",
         error: `Fetch Error: ${error}`,
       };
     }

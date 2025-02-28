@@ -3,6 +3,8 @@ import * as React from 'react'
 import { type WalletClient, useWalletClient } from 'wagmi'
 import { providers } from 'ethers'
 
+//TODO: update this to use the new sdk
+
 export function walletClientToSigner(walletClient: WalletClient): providers.JsonRpcSigner {
   const { account, chain, transport } = walletClient
   const network = {
