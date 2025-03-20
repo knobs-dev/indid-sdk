@@ -26,8 +26,6 @@ import { BigNumberish } from "ethers";
 import { Logger } from "./utils";
 
 
-//TODO: update the interfaces to reflect the new and revisited backend apis
-
 export class BackendCaller {
   public backendUrl: string;
   public apiKey: string;
@@ -226,10 +224,6 @@ export class BackendCaller {
 
     try {
       response = await fetch(url, config);
-      // if (response!.status === 403) {
-      //   response.
-      //   return { paymasterAndData: "", error: "Not Enough Balance" };
-      // }
       if (response.status < 200 || response.status >= 300) {
         const responseText = await response.text();
         Logger.getInstance().debug("response status: ", response.status);
@@ -252,7 +246,6 @@ export class BackendCaller {
   public async getOpStatus(request: IOPStatusRequest): Promise<IOpStatusResponse | null> {
     const url =
       `${this.backendUrl}/op-status?` + new URLSearchParams({ opHash: request.opHash, chainId: Number(request.chainId).toString() });
-    // `${this.backendUrl}/op-status?` + new URLSearchParams({ opHash: opHash});
     let config = {
       method: "get",
       maxBodyLength: Infinity,

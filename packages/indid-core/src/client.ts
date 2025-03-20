@@ -27,7 +27,10 @@ import {
   IConnectAccountResponse,
   IInitCodeRequest,
   IClientConfig,
-  EntryPointMinimalABI
+  EntryPointMinimalABI,
+  IRetrieveSdkDefaultsResponse,
+  IDelegatedTransactionOptions,
+  ISendDelegatedTransactionsRequest
 } from "./types";
 import { LogLevel, Logger, OpToJSON } from "./utils";
 import { UserOperationMiddlewareCtx } from "./context";
@@ -41,33 +44,42 @@ import { AccountVersion, IndidAccount } from "./account";
 import {
   DEFAULT_PRE_VERIFICATION_GAS,
   DEFAULT_VERIFICATION_GAS_LIMIT,
+  DEFAULT_VERIFICATION_GAS_LIMIT_R1,
+  DEFAULT_VERIFICATION_GAS_LIMIT_R1_PRECOMPILE,
   UserOperationBuilder,
 } from "./builder";
 
 import { ec as EC } from "elliptic";
 import * as crypto from "crypto";
 import { IndidSigner } from "./signer";
+import { IndidAddress, SignerKind } from "./address";
 
+/**
+ * Main client class for interacting with the Indid protocol.
+ * Provides methods for account management, transaction creation, and user operation handling.
+ */
 export class Client {
   public provider?: BundlerJsonRpcProvider;
   public backendCaller: BackendCaller;
 
   public entryPointAddress: string;
-  // public guardiansHash: ethers.BytesLike;
-  // public guardianStructId: ethers.BytesLike;
-  // public guardians: string[];
 
   public entryPoint: ethers.Contract;
   public chainId: BigNumberish;
   public account: IndidAccount;
 
+  /**
+   * Private constructor for the Client class.
+   * @param {IClientConfig} config - Client configuration options
+   * @private
+   */
   protected constructor(config: IClientConfig) {
-    // if (config.overrideBundlerRpc) {
-    //   this.provider = new BundlerJsonRpcProvider(config.overrideBundlerRpc).setBundlerRpc(
-    //     config.overrideBundlerRpc
-    //     // "http://localhost:3000/rpc"
-    //   );
-    // }
+    if (config.overrideBundlerRpc) {
+      this.provider = new BundlerJsonRpcProvider(config.overrideBundlerRpc).setBundlerRpc(
+        config.overrideBundlerRpc
+        // "http://localhost:3000/rpc"
+      );
+    }
 
     Logger.getInstance().setLogLevel(config.logLevel || LogLevel.NONE);
 
@@ -82,12 +94,27 @@ export class Client {
     this.account = "0x" as any;
   }
 
+  /**
+   * Initializes a new Client instance with the provided configuration.
+   * Sets up the provider, backend caller, and other essential components.
+   * 
+   * @param config - Client configuration options
+   * @returns A fully initialized Client instance
+   */
   public static async init(config: IClientConfig) {
     const instance = new Client(config);
     await this.initialize(instance, config);
     return instance;
   }
 
+  /**
+   * Internal method to initialize a Client instance with the provided configuration.
+   * Sets up the provider, entryPoint, chainId and other components based on the config.
+   * 
+   * @param instance - The Client instance to initialize
+   * @param config - Client configuration options
+   * @private
+   */
   static async initialize(instance: Client, config: IClientConfig) {
 
     if (config.rpcUrl) {
@@ -128,6 +155,13 @@ export class Client {
 
   }
 
+  /**
+   * Connects to a blockchain provider using the provided RPC URL.
+   * Sets up the entryPoint contract and retrieves the chainId.
+   * 
+   * @param rpcUrl - The URL of the RPC provider
+   * @throws If connection to the provider fails
+   */
   public async connectProvider(rpcUrl: string) {
     this.provider = new BundlerJsonRpcProvider(rpcUrl);
     this.entryPoint = new ethers.Contract(
@@ -142,15 +176,25 @@ export class Client {
     Logger.getInstance().debug("connectProvider has set the chainId to: ", this.chainId);
   }
 
+  /**
+   * Calculates the counterfactual address of an account before it's deployed.
+   * Uses initCode to determine what the account address will be after deployment.
+   * 
+   * @param owners - Array of owner addresses
+   * @param salt - Salt value for address generation
+   * @param opts - Optional account creation parameters
+   * @returns The calculated address or error
+   * @throws If provider is not connected
+   */
   public async getCounterfactualAddress(
-    owner: string,
+    owners: IndidAddress[],
     salt: string = "0",
     opts?: ICreateAccountOpts
   ): Promise<IGetCounterfactualAddressResponse> {
     if (!this.provider) {
       throw new Error("Provider has not been connected, please use the connectProvider function");
     }
-    let response = await this.getInitCode(owner, salt, opts);
+    let response = await this.getInitCode(owners, salt, opts);
 
     if (response.error) {
       return {
@@ -176,6 +220,13 @@ export class Client {
     };
   }
 
+  /**
+   * Gets the sequential nonce for an account from the EntryPoint contract.
+   * 
+   * @param accountAddress - Optional address of the account (uses connected account if not provided)
+   * @returns The account nonce or error
+   * @throws If provider is not connected or no account is available
+   */
   public async getAccountNonce(
     accountAddress?: string
   ): Promise<IGetNonceResponse> {
@@ -197,6 +248,14 @@ export class Client {
   }
 
 
+  /**
+   * Generates a non-sequential (random) nonce for an account.
+   * Creates a random key and uses it to get a non-sequential nonce from the EntryPoint.
+   * 
+   * @param accountAddress - Optional address of the account (uses connected account if not provided)
+   * @returns The generated random nonce or error
+   * @throws If provider is not connected or no account is available
+   */
   public async getNonSequentialAccountNonce(
     accountAddress?: string
   ): Promise<IGetNonceResponse> {
@@ -220,6 +279,15 @@ export class Client {
     return { nonce: await this.entryPoint.getNonce(this.account.address, key) };
   }
 
+  /**
+   * Connects to an existing account with the provided signer and address.
+   * Either uses provided module information or retrieves it from the backend.
+   * 
+   * @param signer - The signer for the account
+   * @param accountAddress - The address of the account to connect
+   * @param opts - Optional account connection parameters
+   * @returns Success or error response
+   */
   public async connectAccount(
     signer: IndidSigner,
     accountAddress: string,
@@ -239,7 +307,7 @@ export class Client {
         opts.storageType as StorageType,
         opts.moduleVersion as ModuleVersion
       );
-      //TODO: owners and ownersHash should probably be passed here
+
       this.account = new IndidAccount({
         signer: signer,
         version: opts.accountVersion as AccountVersion,
@@ -247,10 +315,6 @@ export class Client {
         module: module,
         factoryAddress: opts.factoryAddress
       });
-      //TODO: factoryAddress is only useful is the account is a counterfactual
-      // this.guardians = opts.guardians;
-      // this.guardiansHash = opts.guardiansHash;
-      // this.guardianStructId = opts.guardianStructId;
       return {};
     }
     else {
@@ -280,11 +344,22 @@ export class Client {
     }
   }
 
+  /**
+   * Prepares a user operation to execute multiple transactions in a single call.
+   * Encodes the transactions for multicall execution through the account's module.
+   * 
+   * @param transactions - Array of transaction objects 
+   * @param opts - Optional user operation parameters
+   * @returns A builder with the partially constructed user operation
+   * @throws If no signer is available
+   */
   public async prepareSendTransactions(
     transactions: ICall[],
     opts?: IUserOperationOptions
   ): Promise<IUserOperationBuilder> {
-    //TODO: check that signer or account address is set
+    if (!this.account.signer) {
+      throw new Error("No signer available, connect account first");
+    }
 
     Logger.getInstance().debug("moduleType: ", this.account.module.moduleType);
 
@@ -307,6 +382,16 @@ export class Client {
     return builder;
   }
 
+  /**
+   * Prepares a user operation for an enterprise recovery operation.
+   * Creates and signs the appropriate calldata for transferring account ownership.
+   * 
+   * @param accountAddress - The address of the account to recover
+   * @param newOwner - The address of the new owner
+   * @param opts - Optional user operation parameters
+   * @returns A builder with the partially constructed user operation
+   * @throws If provider is not connected, no signer is available, or module type is not enterprise
+   */
   public async prepareEnterpriseRecoveryOperation(
     accountAddress: string,
     newOwner: string,
@@ -344,6 +429,17 @@ export class Client {
     return builder;
   }
 
+  /**
+   * Prepares a user operation to send a module operation with provided signatures.
+   * Used for operations that require pre-signed approvals.
+   * 
+   * @param calldata - The calldata for the module operation
+   * @param nonce - The nonce for the module operation
+   * @param deadline - The deadline timestamp for the module operation
+   * @param signatures - The signatures for the module operation
+   * @param opts - Optional user operation parameters
+   * @returns A builder with the partially constructed user operation
+   */
   public async prepareSendModuleOperation(
     calldata: string,
     nonce: string,
@@ -369,144 +465,133 @@ export class Client {
     return builder;
   }
 
-
-  //TODO: the owner should be passed prefixed, is this ok?
+  /**
+   * Gets the initialization code for an account.
+   * Either retrieves the init code for an existing account or generates it for a new one.
+   * 
+   * @param owners - Optional array of owner addresses
+   * @param salt - Salt value for account creation
+   * @param opts - Optional account creation parameters
+   * @returns The initialization code or error
+   */
   public async getInitCode(
-    owner?: string,
+    owners?: IndidAddress[],
     salt: string = "0",
     opts?: ICreateAccountOpts
   ): Promise<IInitCodeResponse> {
     // If account already exists, fetch its init code from backend
     if (this.account.address !== "0x") {
       const response = await this.backendCaller.getAccountInfo({
-        accountAddress: this.account.address, 
+        accountAddress: this.account.address,
         chainId: this.chainId.toString()
       });
       return { initCode: response.initCode, error: response.error };
     }
 
-    // Handle case when owner address is not provided
-    if (owner === undefined) {
-      if (!this.account.signer) {
-        return {
-          initCode: "",
-          error: "No signer available, provide owner address",
+    let ownersPrefixedAddresses: string[] = [];
+    let config: ICreateAccountOpts;
+    
+    // Handle case when no options are provided - use defaults from backend
+    if (opts == null) {
+      const defaultsResponse = await this.backendCaller.retrieveSdkDefaults(this.chainId);
+      config = {
+        factoryAddress: defaultsResponse.factoryAddress,
+        moduleAddress: defaultsResponse._module,
+        guardians: defaultsResponse._guardians.map(g => IndidAddress.newFromPrefixedAddress(g)),
+        beaconId: defaultsResponse._guardianId,
+        moduleType: defaultsResponse.moduleType,
+        storageType: defaultsResponse.storageType
+      };
+    }
+    // When options are provided, validate they include all necessary parameters
+    else {
+      config = { ...opts };
+      
+      // Validate required common parameters
+      if (!config.factoryAddress || !config.moduleAddress || !config.moduleType || !config.storageType) {
+        return { 
+          initCode: "", 
+          error: "Missing required parameters: factoryAddress, moduleAddress, moduleType, and storageType must be provided" 
         };
       }
       
-      try {
-        owner = await this.account.signer.getAddress();
-      } catch (error) {
-        return {
-          initCode: "",
-          error: "Unable to retrieve signer address, please provide owner address",
+      // Validate storage-type specific parameters
+      if (config.storageType === "standard" && (!config.guardians || config.guardians.length === 0)) {
+        return { 
+          initCode: "", 
+          error: "For standard storage type, guardians must be provided" 
         };
       }
       
-      if (!owner) {
-        return {
-          initCode: "",
-          error: "Unable to retrieve signer address, please provide owner address",
+      if (config.storageType === "shared" && !config.beaconId) {
+        return { 
+          initCode: "", 
+          error: "For shared storage type, beaconId must be provided" 
         };
       }
     }
 
-    // Set up configuration using options or defaults from account
-    const config: ICreateAccountOpts = opts ? { ...opts } : {
-      factoryAddress: this.account.factoryAddress,
-      moduleAddress: this.account.module.address,
-      guardians: this.account.guardians,
-      moduleType: this.account.module.moduleType,
-      storageType: this.account.module.storageType
-    };
-    
-    const storageType = config.storageType;
+    // Validate owners
+    if (owners === undefined || owners.length === 0) {
+      return { initCode: "", error: "No owners provided, at least one owner address is required" };
+    } else {
+      ownersPrefixedAddresses = owners.map(owner => owner.getPrefixedAddress());
+    }
 
     let requestData: IInitCodeRequest;
+    const storageType = config.storageType;
 
-
-    //TODO: revisit storage handling
-    // Handle standard storage type
+    // Build request data based on storage type
     if (storageType === "standard") {
-      // Determine guardians hash
-      if (opts?.guardiansHash) {
-        config.guardiansHash = opts.guardiansHash;
-      } else if (opts?.guardians) {
+      try {
         // Pack and hash guardians using ethers v6 methods
         const packedGuardiansArray = ethers.solidityPacked(
           ["address[]"],
-          [opts.guardians]
+          [config.guardians!.map(g => g.getPrefixedAddress())]
         );
-        config.guardiansHash = ethers.keccak256(packedGuardiansArray);
-      } else if (!opts && this.account.module) {
-        // Try to use guards hash from account module
-        const guardians = this.account.guardians;
-        if (guardians && guardians.length > 0) {
-          const packedGuardiansArray = ethers.solidityPacked(
-            ["address[]"],
-            [guardians]
-          );
-          config.guardiansHash = ethers.keccak256(packedGuardiansArray);
-        } else {
-          return {
-            initCode: "",
-            error: "No guardians available in account",
-          };
-        }
-      } else {
-        return {
-          initCode: "",
-          error: "No guardiansHash or guardians provided",
+        
+        const guardiansHash = ethers.keccak256(packedGuardiansArray);
+        
+        requestData = {
+          owners: owners.map(o => o.getPrefixedAddress()), // Using first owner for now
+          factoryAddress: config.factoryAddress,
+          guardiansHash,
+          moduleAddress: config.moduleAddress,
+          salt,
+          chainId: this.chainId,
         };
+      } catch (error) {
+        return { initCode: "", error: `Error processing guardians: ${error}` };
       }
-
+    } else if (storageType === "shared") {
       requestData = {
-        owner: owner,
+        owners: owners.map(o => o.getPrefixedAddress()), // Using first owner for now
         factoryAddress: config.factoryAddress,
-        guardiansHash: config.guardiansHash,
+        guardianId: config.beaconId!,
         moduleAddress: config.moduleAddress,
-        salt: salt,
+        salt,
         chainId: this.chainId,
       };
-    } 
-    // Handle shared storage type
-    else if (storageType === "shared") {
-      if (opts?.beaconId) {
-        config.beaconId = opts.beaconId;
-      } else if (!opts && this.account.beaconId) {
-        config.beaconId = this.account.beaconId;
-      } else {
-        return { 
-          initCode: "", 
-          error: "No beaconId provided" 
-        };
-      }
-
-      requestData = {
-        owner: owner,
-        factoryAddress: config.factoryAddress,
-        guardianId: config.beaconId,
-        moduleAddress: config.moduleAddress,
-        salt: salt,
-        chainId: this.chainId,
-      };
-    } 
-    // Handle invalid storage type
-    else {
-      return { 
-        initCode: "", 
-        error: "Invalid storage type" 
-      };
+    } else {
+      return { initCode: "", error: "Invalid storage type" };
     }
 
     // Call backend to retrieve init code
     const response = await this.backendCaller.retrieveInitCode(requestData);
-    return { 
-      initCode: response.initCode, 
-      error: response.error 
+    return {
+      initCode: response.initCode,
+      error: response.error
     };
   }
 
+  /**
+   * Sends a user operation to the bundler through the backend service.
+   * Optionally provide webhook data for notification of operation status.
+   * 
+   * @param builder - The user operation builder
+   * @param webhookData - Optional webhook data for notifications
+   * @returns The operation hash, task ID, or error
+   */
   public async sendUserOperation(
     builder: IUserOperationBuilder,
     webhookData?: IWebHookRequest
@@ -524,6 +609,15 @@ export class Client {
     };
   }
 
+  /**
+   * Prepares a user operation to send ETH to a recipient.
+   * Convenience wrapper around prepareSendTransactions for ETH transfers.
+   * 
+   * @param recipientAddress - The recipient address
+   * @param amount - The amount of ETH to send
+   * @param opts - Optional user operation parameters
+   * @returns A builder with the partially constructed user operation
+   */
   async prepareSendETH(
     recipientAddress: string,
     amount: BigNumberish,
@@ -536,6 +630,16 @@ export class Client {
 
   }
 
+  /**
+   * Prepares a user operation to send ERC20 tokens to a recipient.
+   * Encodes an ERC20 transfer call and prepares it for execution.
+   * 
+   * @param contractAddress - The ERC20 token contract address
+   * @param recipientAddress - The recipient address
+   * @param amount - The amount of tokens to send
+   * @param opts - Optional user operation parameters
+   * @returns A builder with the partially constructed user operation
+   */
   public async prepareSendERC20(
     contractAddress: string,
     recipientAddress: string,
@@ -556,6 +660,14 @@ export class Client {
     ));
   }
 
+  /**
+   * Waits for a user operation to be completed and returns its receipt.
+   * Internally retrieves the task ID for the operation, then waits for task completion.
+   * 
+   * @param userOpHash - The hash of the user operation
+   * @param timeoutMs - Timeout in milliseconds (default 100 seconds)
+   * @returns The operation receipt or error
+   */
   public async waitOP(
     userOpHash: string,
     timeoutMs: number = 100000
@@ -587,6 +699,14 @@ export class Client {
     };
   }
 
+  /**
+   * Waits for a task to be completed via WebSocket connection.
+   * Opens a WebSocket connection to the backend and waits for task status updates.
+   * 
+   * @param taskId - The ID of the task to wait for
+   * @param timeoutMs - Timeout in milliseconds (default 100 seconds)
+   * @returns The task result containing status, receipt, and reason
+   */
   public async waitTask(
     taskId: string,
     timeoutMs: number = 100000
@@ -649,17 +769,32 @@ export class Client {
     });
   }
 
+  /**
+   * Builds a complete user operation from a builder object.
+   * Finalizes all fields and prepares the operation for submission.
+   * 
+   * @param builder - The user operation builder
+   * @returns The built user operation
+   */
   async buildUserOperation(builder: IUserOperationBuilder) {
     return builder.buildOp(await this.entryPoint.getAddress(), this.chainId);
   }
 
+  /**
+   * Fills a user operation with necessary data based on the provided calldata.
+   * Sets sender, calldata, gas parameters, and other fields required for a valid operation.
+   * 
+   * @param callData - The calldata for the user operation
+   * @param opts - Optional user operation parameters
+   * @returns A builder with the filled user operation
+   * @throws If provider is not connected
+   */
   async fillUserOperation(
     callData: string,
     opts?: IUserOperationOptions
   ): Promise<UserOperationBuilder> {
     //TODO: all the gas part should be rewritten to use the native estimateGas from the bundler
     if (!this.provider) {
-      //TODO: the provider is only needed for the sequential nonce if we use the bundler for the estimateGas
       throw new Error("Provider has not been connected, please use the connectProvider function");
     }
     let builder = new UserOperationBuilder();
@@ -681,79 +816,103 @@ export class Client {
         gasLimit: 10e6,
       });
 
+      //TODO: why is initEstimate added?
       verificationGasLimit = verificationGasLimit + initEstimate;
 
       //GAS: adding a flat 1e6 gas to the callGasLimit because the estimate when using initCode is not always accurate
       callGasLimit = callGasLimit + BigInt(1e6);
-    } else {
-      //No init code case
-      let internalNonce;
-      if (opts?.nonceOP !== undefined) {
-        internalNonce = opts.nonceOP;
+    } else if (await this.account.isCounterfactual(this.provider)) 
+      { 
+        const initCodeResponse = await this.getInitCode();
+        if (initCodeResponse.error) {
+          throw new Error("Error getting init code: " + initCodeResponse.error);
+        }
+        builder.setInitCode(initCodeResponse.initCode);
+        builder.setNonce(0);
+        
+      }
+      else {
+        //No init code case
+        let internalNonce;
+        if (opts?.nonceOP !== undefined) {
+          internalNonce = opts.nonceOP;
+        } else {
+          internalNonce = (await this.getNonSequentialAccountNonce()).nonce;
+        }
+        builder.setNonce(internalNonce);
+        Logger.getInstance().debug("nonceSDK inside fillUserOperation", internalNonce);
+
+        //TODO: check this code, is 0x100 the correct address?
+        if (this.account.signer?.getCurveType() === "secp256r1") {
+          if (await this.provider.getCode("0x100") === "0x") {
+            verificationGasLimit = DEFAULT_VERIFICATION_GAS_LIMIT_R1;
+          }
+          else {
+            verificationGasLimit = DEFAULT_VERIFICATION_GAS_LIMIT_R1_PRECOMPILE;
+          }
+        }
+        // else {
+        //   verificationGasLimit = DEFAULT_VERIFICATION_GAS_LIMIT;
+        // }
+        if (opts?.callGasLimit === undefined) {
+          //TODO: get gaslimit from bundler through backend
+          callGasLimit = BigInt(1e6)
+        }
+      }
+
+      if (opts?.callGasLimit) {
+        builder.setCallGasLimit(opts.callGasLimit);
       } else {
-        internalNonce = (await this.getNonSequentialAccountNonce()).nonce;
+        builder.setCallGasLimit(callGasLimit);
       }
-      builder.setNonce(internalNonce);
-      Logger.getInstance().debug("nonceSDK inside fillUserOperation", internalNonce);
-
-      //TODO: this should change depending on the curve, 
-      //specifically if the precompile is used or not
-      verificationGasLimit = DEFAULT_VERIFICATION_GAS_LIMIT;
-      if (opts?.callGasLimit === undefined) {
-        // callGasLimit = await this.provider.estimateGas({
-        //   from: await this.entryPoint.getAddress(),
-        //   to: this.accountAddress,
-        //   data: callData,
-        // });
-        callGasLimit = BigInt(1e6)//TODO: get gaslimit from bundler through backend
+      if (opts?.preVerificationGas) {
+        builder.setPreVerificationGas(opts.preVerificationGas);
+      } else {
+        builder.setPreVerificationGas(DEFAULT_PRE_VERIFICATION_GAS);
       }
-    }
+      if (opts?.verificationGasLimit) {
+        builder.setVerificationGasLimit(opts.verificationGasLimit);
+      } else {
+        builder.setVerificationGasLimit(verificationGasLimit);
+      }
+      if (opts?.maxFeePerGas) {
+        builder.setMaxFeePerGas(opts.maxFeePerGas);
+      } else {
+        if (builder.getMaxFeePerGas() == BigInt(0)) {
+          const block = await this.provider.getBlock("latest");
+          builder.setMaxFeePerGas(
+            block?.baseFeePerGas! + BigInt(builder.getMaxPriorityFeePerGas())
+          );
+        }
+      }
+      if (opts?.maxPriorityFeePerGas) {
+        builder.setMaxPriorityFeePerGas(opts.maxPriorityFeePerGas);
+      }
 
-    if (opts?.callGasLimit) {
-      builder.setCallGasLimit(opts.callGasLimit);
-    } else {
-      builder.setCallGasLimit(callGasLimit);
-    }
-    if (opts?.preVerificationGas) {
-      builder.setPreVerificationGas(opts.preVerificationGas);
-    } else {
-      builder.setPreVerificationGas(DEFAULT_PRE_VERIFICATION_GAS);
-    }
-    if (opts?.verificationGasLimit) {
-      builder.setVerificationGasLimit(opts.verificationGasLimit);
-    } else {
-      builder.setVerificationGasLimit(verificationGasLimit);
-    }
-    if (opts?.maxFeePerGas) {
-      builder.setMaxFeePerGas(opts.maxFeePerGas);
-    } else {
       if (builder.getMaxFeePerGas() == BigInt(0)) {
         const block = await this.provider.getBlock("latest");
+        Logger.getInstance().debug(
+          "block.baseFeePerGas",
+          Number(block?.baseFeePerGas?.toString() ?? "0")
+        );
+
+        Logger.getInstance().debug("maxPriorityFeePerGas", builder.getMaxPriorityFeePerGas());
         builder.setMaxFeePerGas(
           block?.baseFeePerGas! + BigInt(builder.getMaxPriorityFeePerGas())
         );
       }
-    }
-    if (opts?.maxPriorityFeePerGas) {
-      builder.setMaxPriorityFeePerGas(opts.maxPriorityFeePerGas);
-    }
 
-    if (builder.getMaxFeePerGas() == BigInt(0)) {
-      const block = await this.provider.getBlock("latest");
-      Logger.getInstance().debug(
-        "block.baseFeePerGas",
-        Number(block?.baseFeePerGas?.toString() ?? "0")
-      );
-
-      Logger.getInstance().debug("maxPriorityFeePerGas", builder.getMaxPriorityFeePerGas());
-      builder.setMaxFeePerGas(
-        block?.baseFeePerGas! + BigInt(builder.getMaxPriorityFeePerGas())
-      );
+      return builder;
     }
 
-    return builder;
-  }
-
+  /**
+   * Gets the hash of a user operation.
+   * Calculates the hash that uniquely identifies the operation on-chain.
+   * 
+   * @param builder - The user operation builder
+   * @returns The operation hash
+   * @throws If provider is not connected
+   */
   public async getUserOperationHash(
     builder: IUserOperationBuilder
   ): Promise<IGetUserOperationHashResponse> {
@@ -770,6 +929,14 @@ export class Client {
     return { userOpHash: message };
   }
 
+  /**
+   * Signs a user operation with the connected account's signer.
+   * Gets the operation hash and signs it with the account's private key.
+   * 
+   * @param builder - The user operation builder
+   * @returns The signature, operation hash, or error
+   * @throws If provider is not connected
+   */
   async signUserOperation(
     builder: IUserOperationBuilder
   ): Promise<ISignUserOperationResponse> {
@@ -800,6 +967,17 @@ export class Client {
     };
   }
 
+  /**
+   * Sends a user operation directly to the bundler and optionally waits for its inclusion.
+   * Provides both dry-run capability and actual submission with monitoring.
+   * 
+   * @param builder - The user operation builder
+   * @param timeoutMs - Timeout in milliseconds for waiting (default 100 seconds)
+   * @param waitIntervalMs - Interval in milliseconds between checks while waiting (default 5 seconds)
+   * @param opts - Optional sending parameters
+   * @returns The operation hash and a wait function
+   * @throws If provider is not connected
+   */
   async sendUserOperationBundler(
     builder: IUserOperationBuilder,
     timeoutMs: number = 100000,
@@ -849,11 +1027,19 @@ export class Client {
     };
   }
 
+  /**
+   * Verifies the signature of a webhook request.
+   * Validates that the request body matches the hash and checks the signature.
+   * 
+   * @param req - The webhook request with body and signature headers
+   * @param verifyingKey - Optional custom verification key
+   * @returns True if the signature is valid, false otherwise
+   * @static
+   */
   public static verifyWebhookSignature(
     req: IWebHookSignatureRequest,
     verifyingKey?: string
   ): boolean {
-    //TODO: maybe add log level to the static methods params
     const curve = new EC("secp256k1");
 
     const computedMsgBodyHash = crypto
@@ -888,5 +1074,55 @@ export class Client {
     }
 
     return outcome;
+  }
+
+  /**
+   * Prepares a delegated transaction without sending it.
+   * This function creates the necessary data for a delegated transaction that can be sent later.
+   * 
+   * @param transactions - The transactions to send
+   * @param opts - Optional parameters for the delegated transaction
+   * @returns An object implementing ISendDelegatedTransactionsRequest
+   * @throws If no account is connected or no chainId is available
+   */
+  public async prepareDelegatedTransaction(
+    transactions: ICall[],
+    opts?: IDelegatedTransactionOptions
+  ): Promise<ISendDelegatedTransactionsRequest> {
+    let chainId = opts?.chainId || this.chainId;
+    if (chainId === undefined || chainId === 0) {
+      throw new Error("No chainId provided, either pass chainId in options or connect to a provider");
+    }
+    if (this.account.address === "0x") {
+      throw new Error("No account available, create or connect account first");
+    }
+
+    const calldataMulticall = this.account.module.getCalldataMulticall(
+      this.account.address,
+      transactions,
+      opts?.doNotRevertOnTxFailure
+    );
+
+    const currentTime = Math.round(new Date().getTime() / 1000);
+    const deadline = currentTime + (opts?.deadlineSeconds || 60 * 60);
+
+    let { signature, nonce } = await this.account.signer.signEIP712Transaction(
+      this.account.address,
+      this.account.module.address,
+      calldataMulticall,
+      deadline,
+      chainId
+    );
+
+    return {
+      accountAddress: this.account.address,
+      chainId: chainId.toString(),
+      moduleAddress: this.account.module.address,
+      data: calldataMulticall,
+      nonce: nonce,
+      deadline: deadline,
+      sigs: signature,
+      webhookData: opts?.webhookData
+    };
   }
 }

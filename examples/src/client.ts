@@ -1,4 +1,5 @@
-import { Client } from "@indid/indid-core-sdk";
+// import { Client } from "@indid/indid-core-sdk";
+import { Client, IndidSigner } from "../../packages/indid-core";
 import dotenv from "dotenv";
 import { ethers } from "ethers";
 
@@ -8,17 +9,20 @@ dotenv.config();
 const rpcUrl = process.env.RPC_URL!;
 const coreApiKey = process.env.INDID_PUB_APIKEY!;
 const privKey = process.env.PRIVATE_KEY;
-const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+const provider = new ethers.JsonRpcProvider(rpcUrl);
 
 async function run() {
   const clientUser = await Client.init({rpcUrl: rpcUrl, apiKey: coreApiKey});
 
   // generate a new wallet
   const wallet = privKey? new ethers.Wallet(privKey) : ethers.Wallet.createRandom();
+  
+  // create an indid signer from the wallet
+  const indidSigner = IndidSigner.fromSecp256k1(wallet.privateKey);
 
   // get smart account address
   const {accountAddress} = await clientUser.getCounterfactualAddress(
-    wallet.address
+    [await indidSigner.getIndidAddress()]
   );
   console.log(
     "accountAddress returned from sdk",
@@ -26,11 +30,11 @@ async function run() {
   );
 
   // connect smart account
-  clientUser.connectAccount(wallet, accountAddress);
+  clientUser.connectAccount(indidSigner, accountAddress);
 
 
   // wait until address has balance greater than 0 - you can send money
-  while ((await provider.getBalance(accountAddress)).isZero()) {
+  while (await provider.getBalance(accountAddress) === 0n) {
     await new Promise((resolve) => setTimeout(resolve, 10000));
     console.log("waiting for balance to be greater than 0");
   }
@@ -41,9 +45,14 @@ async function run() {
 
   const {initCode, error} = await clientUser.getInitCode();
 
+  if (error) {
+    console.error("error", error);
+    return;
+  }
+
   const userop = await clientUser.prepareSendETH(
     accountAddress,
-    ethers.utils.parseEther("0.001"),
+    ethers.parseEther("0.001"),
     {
       initCode: initCode,
     }

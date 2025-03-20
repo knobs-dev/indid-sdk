@@ -13,16 +13,23 @@ import {
   ISendDelegatedTransactionsResponse,
   ICall,
   Logger,
-  LogLevel, 
+  LogLevel,
   IClientConfig,
   IndidSigner,
   SignerKind,
-  IRetrieveSdkDefaultsResponse
+  IRetrieveSdkDefaultsResponse,
+  IndidAddress,
+  IndidModule,
+  ModuleType,
+  ModuleVersion,
+  StorageType,
+  ISendDelegatedTransactionsRequest
 } from "@indid/indid-core-sdk";
-import { IndidModule, ModuleType, ModuleVersion, StorageType } from "@indid/indid-core-sdk/dist/module";
-import { ethers } from "ethers";
 
 
+/**
+ * AdminClient is a class that extends the Client class and adds additional functionality for creating and managing accounts.
+ */
 class AdminClient extends Client {
   private constructor(config: IClientConfig) {
     super(config);
@@ -35,23 +42,79 @@ class AdminClient extends Client {
     return instance;
   }
 
+  /**
+   * Creates an account
+   * @param owners The owners of the account
+   * @param salt The salt to use for the account
+   * @param webhookData The webhook data to use for the account creation
+   * @param opts The options to use for the account
+   * @returns The account address and task id
+   */
   public async createAccount(
-    owner: string,
+    owners: IndidAddress[],
     salt: string = "0",
     webhookData?: IWebHookRequest,
     opts?: ICreateAccountOpts
   ): Promise<ICreateAccountResponse> {
-    let config = { ...opts };
-    let defaultsResponse: IRetrieveSdkDefaultsResponse;
-    defaultsResponse = await this.backendCaller.retrieveSdkDefaults(this.chainId);
+    let config: ICreateAccountOpts;
 
+
+
+    // Handle case when no options are provided - use defaults from backend
     if (opts == null) {
-      config.factoryAddress = defaultsResponse.factoryAddress;
-      config.moduleAddress = defaultsResponse._module;
-      config.guardians = defaultsResponse._guardians;
-      config.beaconId = defaultsResponse._guardianId;
-      config.moduleType = defaultsResponse.moduleType;
-      config.storageType = defaultsResponse.storageType;
+      // Get defaults from backend if needed
+      let defaultsResponse: IRetrieveSdkDefaultsResponse;
+      defaultsResponse = await this.backendCaller.retrieveSdkDefaults(this.chainId);
+      if (defaultsResponse.error) {
+        return { accountAddress: "", taskId: "", error: defaultsResponse.error };
+      }
+      config = {
+        factoryAddress: defaultsResponse.factoryAddress,
+        moduleAddress: defaultsResponse._module,
+        guardians: defaultsResponse._guardians.map(g => IndidAddress.newFromPrefixedAddress(g)),
+        beaconId: defaultsResponse._guardianId,
+        moduleType: defaultsResponse.moduleType,
+        storageType: defaultsResponse.storageType
+      };
+    }
+    // When options are provided, validate they include all necessary parameters
+    else {
+      config = { ...opts };
+
+      // Validate required common parameters
+      if (!config.factoryAddress || !config.moduleAddress || !config.moduleType || !config.storageType) {
+        return {
+          accountAddress: "",
+          taskId: "",
+          error: "Missing required parameters: factoryAddress, moduleAddress, moduleType, and storageType must be provided"
+        };
+      }
+
+      // Validate storage-type specific parameters
+      if (config.storageType === "standard" && (!config.guardians || config.guardians.length === 0)) {
+        return {
+          accountAddress: "",
+          taskId: "",
+          error: "For standard storage type, guardians must be provided"
+        };
+      }
+
+      if (config.storageType === "shared" && !config.beaconId) {
+        return {
+          accountAddress: "",
+          taskId: "",
+          error: "For shared storage type, beaconId must be provided"
+        };
+      }
+    }
+
+    // Validate owners
+    if (owners === undefined || owners.length === 0) {
+      return {
+        accountAddress: "",
+        taskId: "",
+        error: "No owners provided, at least one owner address is required"
+      };
     }
 
     let response: ICreateAccountResponse;
@@ -60,32 +123,19 @@ class AdminClient extends Client {
       response = await this.backendCaller.backendCreateAccount({
         factoryAddress: config.factoryAddress,
         chainId: this.chainId.toString(),
-        owner: owner,
+        owners: owners.map(o => o.getPrefixedAddress()),
         _module: config.moduleAddress,
-        _guardians: config.guardians,
+        _guardians: config.guardians!.map(g => g.getPrefixedAddress()),
         salt: salt,
         webhookData,
-
       });
     } else if (config.storageType === "shared") {
-      if (opts != null) {
-        if (opts.beaconId === undefined) {
-          return {
-            accountAddress: "",
-            taskId: "",
-            error: "No beaconId provided",
-          };
-        }
-        config.beaconId = opts.beaconId;
-      } else {
-        config.beaconId = defaultsResponse._guardianId;
-      }
       response = await this.backendCaller.backendCreateAccount({
         factoryAddress: config.factoryAddress,
         chainId: this.chainId.toString(),
-        owner: owner,
+        owners: owners.map(o => o.getPrefixedAddress()),
         _module: config.moduleAddress,
-        _guardianId: config.beaconId,
+        _guardianId: config.beaconId!,
         salt: salt,
         webhookData,
       });
@@ -100,18 +150,26 @@ class AdminClient extends Client {
     };
   }
 
+
+  /**
+   * Creates and connects an account
+   * @param signer The signer to use for the account
+   * @param salt The salt to use for the account
+   * @param webhookData The webhook data to use for the account creation
+   * @param opts The options to use for the account
+   * @returns The account address and task id
+   */
   public async createAndConnectAccount(
     signer: IndidSigner,
     salt: string = "0",
     webhookData?: IWebHookRequest,
     opts?: ICreateAccountOpts
   ): Promise<ICreateAndConnectAccountResponse> {
-    //TODO: the signer should create a new onwer on either curve
     if (!this.provider) {
       throw new Error("Provider has not been connected, please use the connectProvider function");
     }
     const response = await this.createAccount(
-      await signer.getAddress(),
+      [await signer.getIndidAddress()],
       salt,
       webhookData,
       opts
@@ -141,6 +199,11 @@ class AdminClient extends Client {
     };
   }
 
+  /**
+   * Gets the sponsorship for a user operation
+   * @param builder The user operation builder
+   * @returns The paymaster and data
+   */
   async getUserOpSponsorship(
     builder: IUserOperationBuilder
   ): Promise<IUserOpSponsorshipResponse> {
@@ -159,19 +222,27 @@ class AdminClient extends Client {
     return { paymasterAndData: response.paymasterAndData, error: undefined };
   }
 
+  /**
+   * Recovers an enterprise account
+   * @param accountAddress The address of the account to recover
+   * @param newOwner The new owner of the account
+   * @param guardianSigner The signer for the account guardian
+   * @param webhookData The webhook data to use
+   * @returns The task id and possible error
+   */
   public async recoverEnterpriseAccount(
     accountAddress: string,
     newOwner: string,
     guardianSigner: IndidSigner,
     webhookData?: IWebHookRequest
   ): Promise<IRecoverAccountResponse> {
-    //TODO: is this check needed? the provider here is used to get the chainId
     if (!this.provider) {
       throw new Error("Provider has not been connected, please use the connectProvider function");
     }
 
     //get account info
-    const accountInfoResponse = await this.backendCaller.getAccountInfo({ accountAddress: accountAddress, chainId: this.chainId.toString() });
+    const accountInfoResponse = await this.backendCaller.getAccountInfo(
+      { accountAddress: accountAddress, chainId: this.chainId.toString() });
     const module = new IndidModule(
       accountInfoResponse.moduleAddress,
       accountInfoResponse.moduleType as ModuleType,
@@ -208,52 +279,42 @@ class AdminClient extends Client {
     return { taskId: response.taskId, error: undefined };
   }
 
-  public async sendDelegatedTransactions(
-    transactions: ICall[],
-    opts?: IDelegatedTransactionOptions
+  /**
+   * Sends a prepared delegated transaction.
+   * 
+   * @param preparedTransaction - The prepared transaction request object
+   * @returns The task ID or error
+   */
+  public async sendPreparedDelegatedTransactions(
+    preparedTransaction: ISendDelegatedTransactionsRequest
   ): Promise<ISendDelegatedTransactionsResponse> {
-    let chainId = opts?.chainId || this.chainId;
-    if (chainId === undefined || chainId === 0) {
-      return {
-        taskId: "",
-        error: "No chainId provided, either pass chainId in options or connect to a provider",
-      }
-    }
-    if (this.account === undefined) {
-      throw new Error("No account available, create or connect account first");
-    }
-
-    const calldataMulticall = this.account.module.getCalldataMulticall(
-      this.account.address,
-      transactions
-    );
-
-    const currentTime = Math.round(new Date().getTime() / 1000);
-    const deadline = currentTime + (opts?.deadlineSeconds || 60 * 60);
-
-    let { signature, nonce } = await this.account.signer.signEIP712Transaction(
-      this.account.address,
-      this.account.module.address,
-      calldataMulticall,
-      deadline,
-      chainId
-    );
-
-    const response = await this.backendCaller.sendDelegatedTransactions({
-      accountAddress: this.account.address,
-      chainId: chainId.toString(),
-      moduleAddress: this.account.module.address,
-      data: calldataMulticall,
-      nonce: nonce,
-      deadline: deadline,
-      sigs: signature,
-      webhookData: opts?.webhookData,
-    });
-
+    const response = await this.backendCaller.sendDelegatedTransactions(preparedTransaction);
+    
     return {
       taskId: response.taskId,
       error: response.error,
     };
+  }
+
+  /**
+   * Sends delegated transactions
+   * @param transactions The transactions to send
+   * @param opts The options to use for the transactions
+   * @returns The task id or possible error
+   */
+  public async sendDelegatedTransactions(
+    transactions: ICall[],
+    opts?: IDelegatedTransactionOptions
+  ): Promise<ISendDelegatedTransactionsResponse> {
+    try {
+      const preparedTransaction = await this.prepareDelegatedTransaction(transactions, opts);
+      return await this.sendPreparedDelegatedTransactions(preparedTransaction);
+    } catch (error: any) {
+      return {
+        taskId: "",
+        error: error.message || "Unknown error occurred during delegated transaction preparation",
+      };
+    }
   }
 }
 

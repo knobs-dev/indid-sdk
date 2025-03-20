@@ -7,9 +7,13 @@ import {
   UserOperationMiddlewareFn,
 } from "./types";
 
-export const DEFAULT_VERIFICATION_GAS_LIMIT = BigInt(150000);
-export const DEFAULT_CALL_GAS_LIMIT = BigInt(35000);
-export const DEFAULT_PRE_VERIFICATION_GAS = BigInt(60000);
+//TODO: check these values
+export const DEFAULT_VERIFICATION_GAS_LIMIT = BigInt(150_000);
+export const DEFAULT_VERIFICATION_GAS_LIMIT_R1 = BigInt(450_000);
+export const DEFAULT_VERIFICATION_GAS_LIMIT_R1_PRECOMPILE = BigInt(150_000);
+export const DEFAULT_CALL_GAS_LIMIT = BigInt(1_000_000);
+//TODO: this could be sligthly improved with an accurate calculation
+export const DEFAULT_PRE_VERIFICATION_GAS = BigInt(21000);
 export const MAX_PRIORITY_FEE_PER_GAS = BigInt(1e9);
 
 export const DEFAULT_USER_OP: IUserOperation = {

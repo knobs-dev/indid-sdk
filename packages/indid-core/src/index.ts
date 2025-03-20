@@ -5,6 +5,7 @@ export * from "./client";
 export * from "./context";
 export * from "./provider";
 export * from "./signer";
+export * from "./address";
 export * from "./account";
 export * from "./module";
 export * from "./types";

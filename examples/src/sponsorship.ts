@@ -1,5 +1,5 @@
-import { AdminClient } from "@indid/indid-admin-sdk";
-import { Client, UserOperationBuilder } from "@indid/indid-core-sdk";
+import { AdminClient, IndidSigner } from "../../packages/indid-admin";
+import { Client, UserOperationBuilder } from "../../packages/indid-core";
 import dotenv from "dotenv";
 import { ethers } from "ethers";
 
@@ -10,7 +10,7 @@ const rpcUrl = process.env.RPC_URL!;
 const coreApiKey = process.env.INDID_PUB_APIKEY!;
 const adminApiKey = process.env.INDID_ADMIN_KEY!;
 const privKey = process.env.PRIVATE_KEY;
-const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+const provider = new ethers.JsonRpcProvider(rpcUrl);
 
 // this function leverage the permission level of admin client to ask sponsorship - it should be placed on the backend side
 async function sponsorOperation(operation: UserOperationBuilder) : Promise<string> {
@@ -25,9 +25,12 @@ async function run() {
   // generate a new wallet
   const wallet = privKey? new ethers.Wallet(privKey) : ethers.Wallet.createRandom();
 
+  // create an indid signer from the wallet
+  const indidSigner = IndidSigner.fromSecp256k1(wallet.privateKey);
+
   // get smart account address
   const {accountAddress} = await clientUser.getCounterfactualAddress(
-    wallet.address
+    [await indidSigner.getIndidAddress()]
   );
   console.log(
     "accountAddress returned from sdk",
@@ -35,7 +38,7 @@ async function run() {
   );
 
   // connect smart account
-  clientUser.connectAccount(wallet, accountAddress);
+  clientUser.connectAccount(indidSigner, accountAddress);
 
   /**
    * smart accounts are deployed automatically when you send your first operation
@@ -43,9 +46,14 @@ async function run() {
 
   const {initCode, error} = await clientUser.getInitCode();
 
+  if (error) {
+    console.error("error", error);
+    return;
+  }
+
   const userop = await clientUser.prepareSendETH(
     accountAddress,
-    ethers.utils.parseEther("0"),
+    ethers.parseEther("0"),
     {
       initCode: initCode,
     }
