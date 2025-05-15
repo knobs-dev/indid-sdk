@@ -71,7 +71,11 @@ class AdminClient extends Client {
       config = {
         factoryAddress: defaultsResponse.factoryAddress,
         moduleAddress: defaultsResponse._module,
-        guardians: defaultsResponse._guardians.map(g => IndidAddress.newFromPrefixedAddress(g)),
+        guardians: defaultsResponse._guardians.map((g: any) => {
+          const prefix = g.type === 0 ? "0x00" : "0x01";
+          const addressWithoutPrefix = g.value.startsWith("0x") ? g.value.slice(2) : g.value;
+          return IndidAddress.newFromPrefixedAddress(prefix + addressWithoutPrefix);
+        }),
         beaconId: defaultsResponse._guardianId,
         moduleType: defaultsResponse.moduleType,
         storageType: defaultsResponse.storageType
@@ -123,7 +127,7 @@ class AdminClient extends Client {
       response = await this.backendCaller.backendCreateAccount({
         factoryAddress: config.factoryAddress,
         chainId: this.chainId.toString(),
-        owners: owners.map(o => o.getPrefixedAddress()),
+        owner: owners.map(o => o.getPrefixedAddress()),
         _module: config.moduleAddress,
         _guardians: config.guardians!.map(g => g.getPrefixedAddress()),
         salt: salt,
@@ -133,7 +137,7 @@ class AdminClient extends Client {
       response = await this.backendCaller.backendCreateAccount({
         factoryAddress: config.factoryAddress,
         chainId: this.chainId.toString(),
-        owners: owners.map(o => o.getPrefixedAddress()),
+        owner: owners.map(o => o.getPrefixedAddress()),
         _module: config.moduleAddress,
         _guardianId: config.beaconId!,
         salt: salt,
@@ -174,6 +178,7 @@ class AdminClient extends Client {
       webhookData,
       opts
     );
+    Logger.getInstance().debug("response inside createAndConnectAccount: ", response);
     if (response.error) {
       return {
         accountAddress: "",
@@ -232,7 +237,7 @@ class AdminClient extends Client {
    */
   public async recoverEnterpriseAccount(
     accountAddress: string,
-    newOwner: string,
+    newOwner: IndidAddress,
     guardianSigner: IndidSigner,
     webhookData?: IWebHookRequest
   ): Promise<IRecoverAccountResponse> {
@@ -251,7 +256,7 @@ class AdminClient extends Client {
     );
 
 
-    const calldata = module.getCalldataTransferOwnership(accountAddress, newOwner);
+    const calldata = module.getCalldataTransferOwnership(accountAddress, newOwner.getPrefixedAddress());
     const deadline = Date.now() + 2000;
     let { signature, nonce } = await guardianSigner.signEIP712Transaction(
       accountAddress,
@@ -263,7 +268,7 @@ class AdminClient extends Client {
     );
 
     const response = await this.backendCaller.backendRecoverAccount({
-      newOwner: newOwner,
+      newOwner: newOwner.getPrefixedAddress(),
       walletAddress: accountAddress,
       chainId: this.chainId,
       signature: signature,
@@ -307,7 +312,7 @@ class AdminClient extends Client {
     opts?: IDelegatedTransactionOptions
   ): Promise<ISendDelegatedTransactionsResponse> {
     try {
-      const preparedTransaction = await this.prepareDelegatedTransaction(transactions, opts);
+      const preparedTransaction = await this.prepareDelegatedTransactions(transactions, opts);
       return await this.sendPreparedDelegatedTransactions(preparedTransaction);
     } catch (error: any) {
       return {

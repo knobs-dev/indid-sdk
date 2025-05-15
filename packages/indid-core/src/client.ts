@@ -53,6 +53,7 @@ import { ec as EC } from "elliptic";
 import * as crypto from "crypto";
 import { IndidSigner } from "./signer";
 import { IndidAddress, SignerKind } from "./address";
+import { IndidDeployer } from "./deployer";
 
 /**
  * Main client class for interacting with the Indid protocol.
@@ -196,6 +197,8 @@ export class Client {
     }
     let response = await this.getInitCode(owners, salt, opts);
 
+    Logger.getInstance().debug("response getInitCode: ", response);
+
     if (response.error) {
       return {
         accountAddress: "",
@@ -207,7 +210,8 @@ export class Client {
       to: response.initCode.slice(0, 42),
       data: "0x" + response.initCode.slice(42),
     });
-
+    
+    Logger.getInstance().debug("accountAddress from provider.call: ", accountAddress);
     if (accountAddress === "0x") {
       return {
         accountAddress: "",
@@ -320,10 +324,23 @@ export class Client {
     else {
       const response = await this.backendCaller.getAccountInfo({ accountAddress: accountAddress, chainId: chainId.toString() });
       Logger.getInstance().debug("response backend caller getAccountInfo: ", response);
-      //TODO: check that response.owners should contain the signer address
+      //TODO: fix this to handle backend returning addresses without prefix
+      // Logger.getInstance().debug("response.owner: ", response.owner);
+      // Logger.getInstance().debug("signer.getAddress(): ", await signer.getAddress());
+      // if (!response.owner?.includes(await signer.getAddress())) {
+      //   Logger.getInstance().error("Signer address is not in the owners array");
+      //   return {
+      //     error: "Signer address is not in the owners array"
+      //   }
+      // }
+
+
+      //TODO: fix this to handle versioning
+        
       const module = new IndidModule(
         response.moduleAddress,
-        response.moduleType as ModuleType,
+        // response.moduleType as ModuleType,
+        response.accountVersion as ModuleType,
         response.storageType as StorageType,
         response.moduleVersion as ModuleVersion
       );
@@ -357,6 +374,7 @@ export class Client {
     transactions: ICall[],
     opts?: IUserOperationOptions
   ): Promise<IUserOperationBuilder> {
+    Logger.getInstance().debug("account object: ", this.account);
     if (!this.account.signer) {
       throw new Error("No signer available, connect account first");
     }
@@ -480,7 +498,7 @@ export class Client {
     opts?: ICreateAccountOpts
   ): Promise<IInitCodeResponse> {
     // If account already exists, fetch its init code from backend
-    if (this.account.address !== "0x") {
+    if (this.account.address !== "0x" && this.account.address !== undefined) {
       const response = await this.backendCaller.getAccountInfo({
         accountAddress: this.account.address,
         chainId: this.chainId.toString()
@@ -494,10 +512,17 @@ export class Client {
     // Handle case when no options are provided - use defaults from backend
     if (opts == null) {
       const defaultsResponse = await this.backendCaller.retrieveSdkDefaults(this.chainId);
+      Logger.getInstance().debug("defaultsResponse", defaultsResponse
+      );
+      //TODO: fix this work around for guardian prefixed addresses
       config = {
         factoryAddress: defaultsResponse.factoryAddress,
         moduleAddress: defaultsResponse._module,
-        guardians: defaultsResponse._guardians.map(g => IndidAddress.newFromPrefixedAddress(g)),
+        guardians: defaultsResponse._guardians.map((g: any) => {
+            const prefix = g.type === 0 ? "0x00" : "0x01";
+            const addressWithoutPrefix = g.value.startsWith("0x") ? g.value.slice(2) : g.value;
+            return IndidAddress.newFromPrefixedAddress(prefix + addressWithoutPrefix);
+        }),
         beaconId: defaultsResponse._guardianId,
         moduleType: defaultsResponse.moduleType,
         storageType: defaultsResponse.storageType
@@ -538,6 +563,8 @@ export class Client {
       ownersPrefixedAddresses = owners.map(owner => owner.getPrefixedAddress());
     }
 
+    Logger.getInstance().debug("storageType: ", config.storageType);
+
     let requestData: IInitCodeRequest;
     const storageType = config.storageType;
 
@@ -553,7 +580,7 @@ export class Client {
         const guardiansHash = ethers.keccak256(packedGuardiansArray);
         
         requestData = {
-          owners: owners.map(o => o.getPrefixedAddress()), // Using first owner for now
+          owner: owners.map(o => o.getPrefixedAddress()), // Using first owner for now
           factoryAddress: config.factoryAddress,
           guardiansHash,
           moduleAddress: config.moduleAddress,
@@ -565,7 +592,7 @@ export class Client {
       }
     } else if (storageType === "shared") {
       requestData = {
-        owners: owners.map(o => o.getPrefixedAddress()), // Using first owner for now
+        owner: owners.map(o => o.getPrefixedAddress()), // Using first owner for now
         factoryAddress: config.factoryAddress,
         guardianId: config.beaconId!,
         moduleAddress: config.moduleAddress,
@@ -575,6 +602,8 @@ export class Client {
     } else {
       return { initCode: "", error: "Invalid storage type" };
     }
+
+    Logger.getInstance().debug("requestData inside getInitCode: ", requestData);
 
     // Call backend to retrieve init code
     const response = await this.backendCaller.retrieveInitCode(requestData);
@@ -1085,7 +1114,7 @@ export class Client {
    * @returns An object implementing ISendDelegatedTransactionsRequest
    * @throws If no account is connected or no chainId is available
    */
-  public async prepareDelegatedTransaction(
+  public async prepareDelegatedTransactions(
     transactions: ICall[],
     opts?: IDelegatedTransactionOptions
   ): Promise<ISendDelegatedTransactionsRequest> {
@@ -1123,6 +1152,64 @@ export class Client {
       deadline: deadline,
       sigs: signature,
       webhookData: opts?.webhookData
+    };
+  }
+
+  /**
+   * Prepares contract deployment transactions and calculates their addresses
+   * @param params Array of objects containing bytecode and optional salt
+   * @returns Object containing arrays of calculated addresses and deployment transactions
+   * These can be used with either prepareSendTransactions or prepareDelegatedTransactions
+   * @throws If provider is not connected
+   */
+  public async prepareContractDeploymentTransactions(
+    params: Array<{
+      bytecode: string;
+      salt?: string;
+    }>
+  ): Promise<{
+    expectedAddresses: string[];
+    deployTxs: ICall[];
+  }> {
+    if (!this.provider) {
+      throw new Error("Provider has not been connected, please use the connectProvider function");
+    }
+
+    const deployer = new IndidDeployer(Number(this.chainId));
+    const deployerAddress = deployer.address;
+
+    const results = await Promise.all(
+      params.map(async ({ bytecode, salt }) => {
+        // Use provided salt or default to "0"
+        const finalSalt = salt || "0";
+        
+        // Calculate the expected deployment address
+        const calculatedAddress = await this.provider!.call({
+          to: deployerAddress,
+          data: deployer.calculateExpectedDeployAddress(finalSalt, bytecode)
+        }).then(result => {
+          // Extract address from result (skip '0x' prefix and take last 40 chars)
+          return `0x${result.slice(-40)}`;
+        });
+
+        // Create deployment transaction data
+        const deployTransaction: ICall = {
+          to: deployerAddress,
+          value: 0,
+          data: deployer.getDeployTxCalldata(finalSalt, bytecode)
+        };
+
+        return {
+          calculatedAddress,
+          deployTransaction
+        };
+      })
+    );
+
+    // Separate results into arrays of addresses and transactions
+    return {
+      expectedAddresses: results.map(r => r.calculatedAddress),
+      deployTxs: results.map(r => r.deployTransaction)
     };
   }
 }

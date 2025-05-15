@@ -1,5 +1,5 @@
 // import { AdminClient } from '@indid/indid-admin-sdk'
-import { AdminClient, IndidSigner } from "../../packages/indid-admin";
+import { AdminClient, IndidSigner, LogLevel, SignerKind } from "../../packages/indid-admin";
 import dotenv from "dotenv";
 import { ethers } from "ethers";
 
@@ -12,41 +12,58 @@ const privKey = process.env.PRIVATE_KEY;
 const provider = new ethers.JsonRpcProvider(rpcUrl);
 
 async function run() {
-  const clientUser = await AdminClient.init({rpcUrl: rpcUrl, apiKey: coreApiKey});
+  const clientUser = await AdminClient.init({
+    rpcUrl: rpcUrl,
+    apiKey: coreApiKey, 
+    // overrideBackendUrl: "https://api.dev.indid.io/v2",
+    overrideBackendUrl: "https://5d36-79-37-246-111.ngrok-free.app/v2",
+    logLevel: LogLevel.DEBUG
+  });
 
   // generate a new wallet
-  const wallet = privKey? new ethers.Wallet(privKey) : ethers.Wallet.createRandom();
+  const wallet = privKey ? new ethers.Wallet(privKey) : ethers.Wallet.createRandom();
 
   // create an indid signer from the wallet
+  console.log("wallet.privateKey", wallet.privateKey);
   const indidSigner = IndidSigner.fromSecp256k1(wallet.privateKey);
 
+  console.log("indidSigner", await indidSigner.getIndidAddress());
+
   // get smart account address
-  const {accountAddress} = await clientUser.getCounterfactualAddress(
+  const { accountAddress: accountAddress2 } = await clientUser.getCounterfactualAddress(
     [await indidSigner.getIndidAddress()]
   );
   console.log(
     "accountAddress returned from sdk",
-    accountAddress
+    accountAddress2
   );
 
   // connect and deploy smart account
-  const { error, accountAddress: address } = await clientUser.createAndConnectAccount(indidSigner);
+  // const { error, accountAddress: address } = await clientUser.createAndConnectAccount(indidSigner, "1");
 
-  if(error) {
-    console.error(error);
+  // if (error) {
+  //   console.error(error);
+  //   return;
+  // }
+
+  // console.log("accountAddress after createAndConnectAccount", address);
+
+
+  // // wait until address has balance greater than 0
+  // while (await provider.getBalance(accountAddress) === 0n) {
+  //   await new Promise((resolve) => setTimeout(resolve, 10000));
+  //   console.log("waiting for balance to be greater than 0");
+  // }
+  const accountAddress = "0xe56aaf33cc22c39337c5d75f0b48f966f87e6999"
+  const { error: err } = await clientUser.connectAccount(indidSigner, accountAddress);
+  if (err) {
+    console.error(err);
     return;
-  }
- 
-
-  // wait until address has balance greater than 0
-  while (await provider.getBalance(accountAddress) === 0n) {
-    await new Promise((resolve) => setTimeout(resolve, 10000));
-    console.log("waiting for balance to be greater than 0");
   }
 
   const userop = await clientUser.prepareSendETH(
-    accountAddress,
-    ethers.parseEther("0.001"),
+    wallet.address,
+    ethers.parseEther("0.000"),
   );
 
   // send the operation
@@ -60,7 +77,7 @@ async function run() {
 }
 
 run()
-  .then(() => {})
+  .then(() => { })
   .catch((e) => {
     console.error(e);
   });

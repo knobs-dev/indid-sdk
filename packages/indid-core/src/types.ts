@@ -247,7 +247,7 @@ export interface ICall {
  * @param chainId Blockchain chain ID
  */
 export interface IInitCodeRequest {
-  owners: string[];
+  owner: string[];
   factoryAddress?: string;
   guardiansHash?: BytesLike;
   guardianId?: BytesLike;
@@ -319,7 +319,7 @@ export interface IRecoverAccountResponse {
  */
 export interface ICreateAccountRequest {
   factoryAddress?: string;
-  owners: string[];
+  owner: string[];
   _guardians?: string[];
   _guardianId?: BytesLike;
   _module?: string;
@@ -493,7 +493,7 @@ export interface IGetAccountInfoResponse {
   initCode: string;
   accountVersion: string;
   moduleVersion: string;
-  owners?: string[];
+  owner?: string[];
   ownersHash?: string;
   guardians?: string[];
   guardiansHash?: string;
@@ -694,7 +694,6 @@ export interface ISendDelegatedTransactionsResponse {
 //minimal abis
 //TODO: move this to separate location
 
-// Add this minimal EntryPoint ABI with only the functions used in client.ts
 export const EntryPointMinimalABI = [
   // For getNonce method
   {

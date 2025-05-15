@@ -368,7 +368,8 @@ export class BackendCaller {
       const response = await fetch(url, config);
       if (response.status < 200 || response.status >= 300) {
         const responseText = await response.text();
-        Logger.getInstance().debug("backend caller response text: ", responseText);
+        Logger.getInstance().debug("backend caller retrieveInitCode response status: ", response.status);
+        Logger.getInstance().debug("backend caller retrieveInitCode response text: ", responseText);
         return { initCode: "", error: responseText };
       }
       return (await response.json()) as IInitCodeResponse;

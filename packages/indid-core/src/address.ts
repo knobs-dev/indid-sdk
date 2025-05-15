@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { ec as EC } from "elliptic";
+import { Logger } from "./utils";
 
 /**
  * Enum representing the type of signer
@@ -236,6 +237,7 @@ export class IndidAddress {
     signerType: SignatureType, 
     address: string 
   } {
+    Logger.getInstance().debug("prefixedAddress inside parsePrefixedAddress: ", prefixedAddress);
     const bytes = ethers.getBytes(prefixedAddress);
     
     // Extract the prefix byte
