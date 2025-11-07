@@ -134,20 +134,26 @@ export interface IClientConfig {
 
 /**
  * Options for creating an account.
+ * @param owner: the owners of the account
+ * @param ownersHash: the hash of the owners of the account
  * @param storageType: the storage type of the account, either "standard" or "shared"
  * @param moduleType: the module type of the account, either "user" or "enterprise"
  * @param factoryAddress: the factory address of the account
  * @param moduleAddress: the module address of the account
  * @param guardians: the guardians of the account
  * @param beaconId: the beacon id for shared storage accounts
+ * @param beaconSalt: the beacon salt for shared storage accounts
  */
 export interface ICreateAccountOpts {
-  storageType: string;
-  moduleType: string;
-  factoryAddress: string;
-  moduleAddress: string;
-  guardians: IndidAddress[];
+  // owner?: string[];
+  // ownersHash?: BytesLike;
+  storageType?: string;
+  moduleType?: string;
+  factoryAddress?: string;
+  moduleAddress?: string;
+  guardians?: IndidAddress[];
   beaconId?: BytesLike;
+  beaconSalt?: string;
 }
 
 /**
@@ -165,8 +171,8 @@ export interface IConnectAccountOpts {
   moduleAddress: string;
   storageType: string;
   factoryAddress: string;
-  accountVersion: string;
-  moduleVersion: string;
+  accountVersion: number;
+  moduleVersion: number;
   chainId?: BigNumberish;
 }
 
@@ -248,11 +254,14 @@ export interface ICall {
  */
 export interface IInitCodeRequest {
   owner: string[];
+  ownersHash?: BytesLike;
   factoryAddress?: string;
+  guardians?: string[];
   guardiansHash?: BytesLike;
   guardianId?: BytesLike;
   moduleAddress?: string;
   salt?: string;
+  beaconSalt?: string;
   chainId: BigNumberish;
 }
 
@@ -319,13 +328,16 @@ export interface IRecoverAccountResponse {
  */
 export interface ICreateAccountRequest {
   factoryAddress?: string;
-  owner: string[];
+  owner?: string[];
   _guardians?: string[];
   _guardianId?: BytesLike;
   _module?: string;
+  moduleType?: string;
+  storageType?: string;
   salt?: string;
+  beaconSalt?: string;
   webhookData?: IWebHookRequest;
-  chainId: BigNumberish;
+  chainId?: BigNumberish;
 }
 
 /**
@@ -436,6 +448,23 @@ export interface ISendUserOpResponse {
 }
 
 /**
+ * Response for user operation gas estimation.
+ * @param gasEstimate The gas estimation result containing nested result object
+ * @param error Optional error message if estimation failed
+ */
+export interface IEstimateUserOpGasResponse {
+  gasEstimate: {
+    result: {
+      preVerificationGas: string;
+      verificationGas: string;
+      verificationGasLimit: string;
+      callGasLimit: string;
+    };
+  };
+  error?: string;
+}
+
+/**
  * Response for retrieving SDK default values.
  * @param factoryAddress Default factory address
  * @param _module Default module address
@@ -491,8 +520,8 @@ export interface IGetAccountInfoResponse {
   storageType: string;
   moduleType: string;
   initCode: string;
-  accountVersion: string;
-  moduleVersion: string;
+  accountVersion: number;
+  moduleVersion: number;
   owner?: string[];
   ownersHash?: string;
   guardians?: string[];
@@ -692,8 +721,6 @@ export interface ISendDelegatedTransactionsResponse {
 
 
 //minimal abis
-//TODO: move this to separate location
-
 export const EntryPointMinimalABI = [
   // For getNonce method
   {

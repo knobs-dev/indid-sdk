@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { ICall } from "./types";
+import { Logger } from "./utils";
 
 /**
  * Defines the type of module being used, either for enterprise or individual users
@@ -17,7 +18,7 @@ export type StorageType = "standard" | "shared";
  * Version of the module implementation
  * Different versions may have different interface requirements and capabilities
  */
-export type ModuleVersion = "v1" | "v2";
+export type ModuleVersion = 1 | 2;
 
 /**
  * Interface definition for v1 modules
@@ -26,7 +27,8 @@ export type ModuleVersion = "v1" | "v2";
 const V1_MODULE_INTERFACE = new ethers.Interface([
   "function multiCall(address account, tuple(address to, uint256 value, bytes data)[] calldata transactions) external",
   "function multiCallNoRevert(address account, tuple(address to, uint256 value, bytes data)[] calldata transactions) external",
-  "function transferOwnership(address wallet, address newOwner) external"
+  "function transferOwnership(address wallet, address newOwner) external",
+  "function execute(address _wallet, bytes calldata _data, uint256 _nonce, uint256 _deadline, bytes calldata _signatures) external"
 ]);
 
 /**
@@ -37,7 +39,8 @@ const V1_MODULE_INTERFACE = new ethers.Interface([
 const V2_MODULE_INTERFACE = new ethers.Interface([
   "function multiCall(address account, tuple(address to, uint256 value, bytes data)[] calldata transactions) external",
   "function multiCallNoRevert(address account, tuple(address to, uint256 value, bytes data)[] calldata transactions) external",
-  "function transferOwnership(address wallet, bytes calldata newOwner) external"
+  "function transferOwnership(address _wallet, bytes calldata _newOwner) external",
+  "function execute(address _wallet, bytes calldata _data, uint256 _nonce, uint256 _deadline, bytes[] calldata _signatures) external"
 ]);
 
 /**
@@ -81,7 +84,56 @@ export class IndidModule {
     this.version = version;
     
     // Set the correct interface based on version
-    this.moduleInterface = version === "v1" ? V1_MODULE_INTERFACE : V2_MODULE_INTERFACE;
+    this.moduleInterface = version === 1 ? V1_MODULE_INTERFACE : V2_MODULE_INTERFACE;
+  }
+
+  public getCalldataExecute(
+    accountAddress: string,
+    data: string,
+    nonce: string,
+    deadline: number,
+    signatures: string[]
+  ): string {
+    if (this.version === 1) {
+      //TODO: check if this works for v1
+      return this.getV1CalldataExecute(accountAddress, data, nonce, deadline, signatures[0]);
+    } else if (this.version === 2) {
+      return this.getV2CalldataExecute(accountAddress, data, nonce, deadline, signatures);
+    }
+
+    throw new Error(`Unsupported version: ${this.version}`);
+  }
+
+  private getV1CalldataExecute(
+    accountAddress: string,
+    data: string,
+    nonce: string,
+    deadline: number,
+    signatures: string
+  ): string {
+    return this.moduleInterface.encodeFunctionData("execute", [
+      accountAddress,
+      data,
+      nonce,
+      deadline,
+      signatures
+    ]);
+  }
+
+  private getV2CalldataExecute(
+    accountAddress: string,
+    data: string,
+    nonce: string,
+    deadline: number,
+    signatures: string[]
+  ): string {
+    return this.moduleInterface.encodeFunctionData("execute", [
+      accountAddress,
+      data,
+      nonce,
+      deadline,
+      signatures
+    ]);
   }
 
   /**
@@ -96,9 +148,9 @@ export class IndidModule {
     transactions: ICall[],
     doNotRevertOnTxFailure = false
   ): string {
-    if (this.version === "v1") {
+    if (this.version === 1) {
       return this.getV1CalldataMulticall(accountAddress, transactions, doNotRevertOnTxFailure);
-    } else if (this.version === "v2") {
+    } else if (this.version === 2) {
       return this.getV2CalldataMulticall(accountAddress, transactions, doNotRevertOnTxFailure);
     }
 
@@ -141,9 +193,9 @@ export class IndidModule {
     accountAddress: string,
     newOwner: string
   ): string {
-    if (this.version === "v1") {
+    if (this.version === 1) {
       return this.getV1CalldataTransferOwnership(accountAddress, newOwner);
-    } else if (this.version === "v2") {
+    } else if (this.version === 2) {
       return this.getV2CalldataTransferOwnership(accountAddress, newOwner);
     }
 
@@ -164,6 +216,7 @@ export class IndidModule {
     accountAddress: string,
     newOwner: string
   ): string {
+    Logger.getInstance().debug(`getV2CalldataTransferOwnership: ${accountAddress} ${newOwner}`);
     // For v2, we're using the moduleInterface set in the constructor
     return this.moduleInterface.encodeFunctionData("transferOwnership", [
       accountAddress,

@@ -1,5 +1,5 @@
 // import { AdminClient } from '@indid/indid-admin-sdk'
-import { AdminClient, IndidSigner, LogLevel, SignerKind } from "../../packages/indid-admin";
+import { AdminClient, IndidSigner, LogLevel, SignerKind } from "../../packages/indid-admin/dist";
 import dotenv from "dotenv";
 import { ethers } from "ethers";
 
@@ -7,7 +7,7 @@ import { ethers } from "ethers";
 dotenv.config();
 
 const rpcUrl = process.env.RPC_URL!;
-const coreApiKey = process.env.INDID_ADMIN_KEY!;
+const coreApiKey = process.env.SHARED_ADMIN_KEY!
 const privKey = process.env.PRIVATE_KEY;
 const provider = new ethers.JsonRpcProvider(rpcUrl);
 
@@ -29,7 +29,7 @@ async function run() {
 
   console.log("indidSigner", await indidSigner.getIndidAddress());
 
-  const salt = "8";
+  const salt = "400001";
 
   // get smart account address
   const { accountAddress: accountAddress2 } = await clientUser.getCounterfactualAddress(
@@ -98,7 +98,10 @@ async function run() {
   const taskResult = await clientUser.waitTask(tx.taskId);
 
   console.log("task completed", taskResult);
-
+  console.log("Task details:", {
+    receipt: taskResult.receipt,
+    logs: taskResult.receipt ? JSON.stringify(taskResult.receipt, null, 2) : undefined
+  });
 
 }
 

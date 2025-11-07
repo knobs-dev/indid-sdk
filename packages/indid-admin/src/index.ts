@@ -23,7 +23,8 @@ import {
   ModuleType,
   ModuleVersion,
   StorageType,
-  ISendDelegatedTransactionsRequest
+  ISendDelegatedTransactionsRequest,
+  ICreateAccountRequest
 } from "@indid/indid-core-sdk";
 
 
@@ -56,9 +57,7 @@ class AdminClient extends Client {
     webhookData?: IWebHookRequest,
     opts?: ICreateAccountOpts
   ): Promise<ICreateAccountResponse> {
-    let config: ICreateAccountOpts;
-
-
+    let config: ICreateAccountRequest;
 
     // Handle case when no options are provided - use defaults from backend
     if (opts == null) {
@@ -70,46 +69,68 @@ class AdminClient extends Client {
       }
       config = {
         factoryAddress: defaultsResponse.factoryAddress,
-        moduleAddress: defaultsResponse._module,
-        guardians: defaultsResponse._guardians.map((g: any) => {
+        _module: defaultsResponse._module,
+        _guardians: defaultsResponse._guardians.map((g: any) => {
           const prefix = g.type === 0 ? "0x00" : "0x01";
           const addressWithoutPrefix = g.value.startsWith("0x") ? g.value.slice(2) : g.value;
-          return IndidAddress.newFromPrefixedAddress(prefix + addressWithoutPrefix);
+          return prefix + addressWithoutPrefix;
         }),
-        beaconId: defaultsResponse._guardianId,
+        _guardianId: defaultsResponse._guardianId,
         moduleType: defaultsResponse.moduleType,
         storageType: defaultsResponse.storageType
       };
     }
-    // When options are provided, validate they include all necessary parameters
+    // When options are provided with at least some parameters
     else {
-      config = { ...opts };
-
-      // Validate required common parameters
-      if (!config.factoryAddress || !config.moduleAddress || !config.moduleType || !config.storageType) {
-        return {
-          accountAddress: "",
-          taskId: "",
-          error: "Missing required parameters: factoryAddress, moduleAddress, moduleType, and storageType must be provided"
+      // Start with defaults from backend if needed
+      if (!opts.factoryAddress || !opts.moduleAddress || !opts.moduleType || !opts.storageType) {
+        let defaultsResponse: IRetrieveSdkDefaultsResponse;
+        defaultsResponse = await this.backendCaller.retrieveSdkDefaults(this.chainId);
+        if (defaultsResponse.error) {
+          return { accountAddress: "", taskId: "", error: defaultsResponse.error };
+        }
+        
+        // Important: Always prioritize guardians from opts if they exist
+        const hasGuardians = opts.guardians && opts.guardians.length > 0;
+        Logger.getInstance().debug("Opts has guardians:", hasGuardians, opts.guardians?.length);
+        
+        config = {
+          factoryAddress: opts.factoryAddress || defaultsResponse.factoryAddress,
+          _module: opts.moduleAddress || defaultsResponse._module,
+          moduleType: opts.moduleType || defaultsResponse.moduleType,
+          storageType: opts.storageType || defaultsResponse.storageType,
+          _guardianId: opts.beaconId || defaultsResponse._guardianId,
+          // Prioritize guardians from opts if provided
+          _guardians: hasGuardians ? opts.guardians!.map(g => g.getPrefixedAddress()) : defaultsResponse._guardians.map((g: any) => {
+            const prefix = g.type === 0 ? "0x00" : "0x01";
+            const addressWithoutPrefix = g.value.startsWith("0x") ? g.value.slice(2) : g.value;
+            return prefix + addressWithoutPrefix;
+          })
         };
+        
+        Logger.getInstance().debug("Final config guardians:", config._guardians);
+      } else {
+        // All required parameters are provided
+        config = { ...opts };
       }
+    }
 
-      // Validate storage-type specific parameters
-      if (config.storageType === "standard" && (!config.guardians || config.guardians.length === 0)) {
-        return {
-          accountAddress: "",
-          taskId: "",
-          error: "For standard storage type, guardians must be provided"
-        };
-      }
+    // Validate storage-type specific parameters
+    if (config.storageType === "standard" && (!config._guardians || config._guardians.length === 0)) {
+      // return {
+      //   accountAddress: "",
+      //   taskId: "",
+      //   error: "For standard storage type, guardians must be provided"
+      // };
+      Logger.getInstance().debug("No guardians provided");
+    }
 
-      if (config.storageType === "shared" && !config.beaconId) {
-        return {
-          accountAddress: "",
-          taskId: "",
-          error: "For shared storage type, beaconId must be provided"
-        };
-      }
+    if (config.storageType === "shared" && !config._guardianId) {
+      return {
+        accountAddress: "",
+        taskId: "",
+        error: "For shared storage type, beaconId must be provided"
+      };
     }
 
     // Validate owners
@@ -128,8 +149,9 @@ class AdminClient extends Client {
         factoryAddress: config.factoryAddress,
         chainId: this.chainId.toString(),
         owner: owners.map(o => o.getPrefixedAddress()),
-        _module: config.moduleAddress,
-        _guardians: config.guardians!.map(g => g.getPrefixedAddress()),
+        _module: config._module,
+        _guardians: config._guardians,
+        beaconSalt: "0",
         salt: salt,
         webhookData,
       });
@@ -138,8 +160,10 @@ class AdminClient extends Client {
         factoryAddress: config.factoryAddress,
         chainId: this.chainId.toString(),
         owner: owners.map(o => o.getPrefixedAddress()),
-        _module: config.moduleAddress,
-        _guardianId: config.beaconId!,
+        _module: config._module,
+        _guardians: config._guardians,
+        _guardianId: config._guardianId!,
+        beaconSalt: "0",
         salt: salt,
         webhookData,
       });
@@ -195,8 +219,14 @@ class AdminClient extends Client {
       };
     }
 
-    this.connectAccount(signer, response.accountAddress);
-
+    const connectResponse = await this.connectAccount(signer, response.accountAddress);
+    if (connectResponse.error) {
+      return {
+        accountAddress: "",
+        taskId: "",
+        error: connectResponse.error,
+      };
+    }
     return {
       accountAddress: response.accountAddress,
       taskId: response.taskId,
@@ -215,10 +245,22 @@ class AdminClient extends Client {
     if (!this.provider) {
       throw new Error("Provider has not been connected, please use the connectProvider function");
     }
-    const response = await this.backendCaller.signPaymasterOp({
-      ...OpToJSON(builder.getOp()),
+    const op = builder.getOp();
+    // Convert BigInt values to strings
+    const serializedOp = {
+      ...op,
+      nonce: op.nonce.toString(),
+      callGasLimit: op.callGasLimit.toString(),
+      verificationGasLimit: op.verificationGasLimit.toString(),
+      preVerificationGas: op.preVerificationGas.toString(),
+      maxFeePerGas: op.maxFeePerGas.toString(),
+      maxPriorityFeePerGas: op.maxPriorityFeePerGas.toString(),
       chainId: this.chainId.toString()
-    });
+
+    };
+    const response = await this.backendCaller.signPaymasterOp(
+      serializedOp,
+    );
     if (response.error) {
       return { paymasterAndData: "", error: response.error };
     }
@@ -227,62 +269,62 @@ class AdminClient extends Client {
     return { paymasterAndData: response.paymasterAndData, error: undefined };
   }
 
-  /**
-   * Recovers an enterprise account
-   * @param accountAddress The address of the account to recover
-   * @param newOwner The new owner of the account
-   * @param guardianSigner The signer for the account guardian
-   * @param webhookData The webhook data to use
-   * @returns The task id and possible error
-   */
-  public async recoverEnterpriseAccount(
-    accountAddress: string,
-    newOwner: IndidAddress,
-    guardianSigner: IndidSigner,
-    webhookData?: IWebHookRequest
-  ): Promise<IRecoverAccountResponse> {
-    if (!this.provider) {
-      throw new Error("Provider has not been connected, please use the connectProvider function");
-    }
+  // /**
+  //  * Recovers an enterprise account
+  //  * @param accountAddress The address of the account to recover
+  //  * @param newOwner The new owner of the account
+  //  * @param guardianSigner The signer for the account guardian
+  //  * @param webhookData The webhook data to use
+  //  * @returns The task id and possible error
+  //  */
+  // public async recoverEnterpriseAccount(
+  //   accountAddress: string,
+  //   newOwner: IndidAddress,
+  //   guardianSigner: IndidSigner,
+  //   webhookData?: IWebHookRequest
+  // ): Promise<IRecoverAccountResponse> {
+  //   if (!this.provider) {
+  //     throw new Error("Provider has not been connected, please use the connectProvider function");
+  //   }
 
-    //get account info
-    const accountInfoResponse = await this.backendCaller.getAccountInfo(
-      { accountAddress: accountAddress, chainId: this.chainId.toString() });
-    const module = new IndidModule(
-      accountInfoResponse.moduleAddress,
-      accountInfoResponse.moduleType as ModuleType,
-      accountInfoResponse.storageType as StorageType,
-      accountInfoResponse.moduleVersion as ModuleVersion
-    );
+  //   //get account info
+  //   const accountInfoResponse = await this.backendCaller.getAccountInfo(
+  //     { accountAddress: accountAddress, chainId: this.chainId.toString() });
+  //   const module = new IndidModule(
+  //     accountInfoResponse.moduleAddress,
+  //     accountInfoResponse.moduleType as ModuleType,
+  //     accountInfoResponse.storageType as StorageType,
+  //     accountInfoResponse.moduleVersion as ModuleVersion
+  //   );
 
 
-    const calldata = module.getCalldataTransferOwnership(accountAddress, newOwner.getPrefixedAddress());
-    const deadline = Date.now() + 2000;
-    let { signature, nonce } = await guardianSigner.signEIP712Transaction(
-      accountAddress,
-      module.address,
-      calldata,
-      deadline,
-      this.chainId,
-      SignerKind.Guardian
-    );
+  //   const calldata = module.getCalldataTransferOwnership(accountAddress, newOwner.getPrefixedAddress());
+  //   const deadline = Date.now() + 2000;
+  //   let { signature, nonce } = await guardianSigner.signEIP712Transaction(
+  //     accountAddress,
+  //     module.address,
+  //     calldata,
+  //     deadline,
+  //     this.chainId,
+  //     SignerKind.Guardian
+  //   );
 
-    const response = await this.backendCaller.backendRecoverAccount({
-      newOwner: newOwner.getPrefixedAddress(),
-      walletAddress: accountAddress,
-      chainId: this.chainId,
-      signature: signature,
-      nonce: nonce,
-      deadline: deadline,
-      webhookData
-    });
+  //   const response = await this.backendCaller.backendRecoverAccount({
+  //     newOwner: newOwner.getPrefixedAddress(),
+  //     walletAddress: accountAddress,
+  //     chainId: this.chainId,
+  //     signature: signature,
+  //     nonce: nonce,
+  //     deadline: deadline,
+  //     webhookData
+  //   });
 
-    if (response.error) {
-      return { taskId: "", error: response.error };
-    }
+  //   if (response.error) {
+  //     return { taskId: "", error: response.error };
+  //   }
 
-    return { taskId: response.taskId, error: undefined };
-  }
+  //   return { taskId: response.taskId, error: undefined };
+  // }
 
   /**
    * Sends a prepared delegated transaction.

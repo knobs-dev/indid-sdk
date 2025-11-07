@@ -21,6 +21,7 @@ import {
   IGetAccountInfoRequest,
   IBSendUserOpRequest,
   IOPStatusRequest,
+  IEstimateUserOpGasResponse,
 } from "./types";
 import { BigNumberish } from "ethers";
 import { Logger } from "./utils";
@@ -113,8 +114,8 @@ export class BackendCaller {
           moduleType: "",
           storageType: "",
           initCode: "",
-          accountVersion: "",
-          moduleVersion: "",
+          accountVersion: 0,
+          moduleVersion: 0,
           error: responseText,
         };
       }
@@ -127,8 +128,8 @@ export class BackendCaller {
         moduleType: "",
         storageType: "",
         initCode: "",
-        accountVersion: "",
-        moduleVersion: "",
+        accountVersion: 0,
+        moduleVersion: 0,
         error: `Fetch Error: ${error}`,
       };
     }
@@ -198,6 +199,70 @@ export class BackendCaller {
       return {
         userOpHash: "",
         taskId: "",
+        error: `Fetch Error: ${error}`,
+      };
+    }
+  }
+
+  public async estimateUserOpGas(
+    data: IBSendUserOpRequest,
+  ): Promise<IEstimateUserOpGasResponse> {
+    // Convert BigInt values to strings for JSON serialization
+    const serializedData = {
+      ...data,
+      nonce: data.nonce.toString(),
+      callGasLimit: data.callGasLimit.toString(),
+      verificationGasLimit: data.verificationGasLimit.toString(),
+      preVerificationGas: data.preVerificationGas.toString(),
+      maxFeePerGas: data.maxFeePerGas.toString(),
+      maxPriorityFeePerGas: data.maxPriorityFeePerGas.toString(),
+      chainId: data.chainId.toString(),
+    };
+
+    // serializedData.signature = "0x00000000fffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c"
+    
+    Logger.getInstance().debug(`data sent via estimateGas: ${JSON.stringify(serializedData)}`);
+    const url = `${this.backendUrl}/user-operations/estimate-gas`;
+    let config = {
+      method: "post",
+      body: JSON.stringify(serializedData),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+    };
+
+    try {
+      const response = await fetch(url, config);
+      if (response.status < 200 || response.status >= 300) {
+        const responseText = await response.text();
+        return {
+          gasEstimate: {
+            result: {
+              preVerificationGas: "0",
+              verificationGas: "0",
+              verificationGasLimit: "0",
+              callGasLimit: "0",
+            },
+          },
+          error: response.status + responseText,
+        };
+      }
+      const responseJson = await response.json();
+      Logger.getInstance().debug(`response from estimateUserOpGas: ${JSON.stringify(responseJson)}`);
+      return responseJson as IEstimateUserOpGasResponse;
+
+    } catch (error: any) {
+      Logger.getInstance().error(error);
+      return {
+        gasEstimate: {
+          result: {
+            preVerificationGas: "0",
+            verificationGas: "0",
+            verificationGasLimit: "0",
+            callGasLimit: "0",
+          },
+        },
         error: `Fetch Error: ${error}`,
       };
     }
@@ -382,6 +447,7 @@ export class BackendCaller {
   public async backendCreateAccount(
     data: ICreateAccountRequest
   ): Promise<ICreateAccountResponse> {
+    Logger.getInstance().debug("backendCreateAccount data: ", data);
     const url = `${this.backendUrl}/create-account`;
     let config = {
       method: "post",

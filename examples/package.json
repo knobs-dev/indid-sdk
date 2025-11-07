@@ -6,7 +6,13 @@
   "scripts": {
     "client": "ts-node src/client.ts",
     "admin": "ts-node src/admin.ts",
+    "adminNew": "ts-node src/adminNew.ts",
+    "delegated": "ts-node src/delegated.ts",
     "sponsorship": "ts-node src/sponsorship.ts",
+    "recovery": "ts-node src/recovery.ts",
+    "recovery:p256" : "ts-node src/recoveryp256.ts",
+    "p256": "ts-node src/p256.ts",
+    "multiOwners": "ts-node src/p256MultipleOwners.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "devDependencies": {

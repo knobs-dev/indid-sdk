@@ -8,7 +8,7 @@ import {
 } from "./types";
 
 //TODO: check these values
-export const DEFAULT_VERIFICATION_GAS_LIMIT = BigInt(150_000);
+export const DEFAULT_VERIFICATION_GAS_LIMIT = BigInt(950_000);
 export const DEFAULT_VERIFICATION_GAS_LIMIT_R1 = BigInt(450_000);
 export const DEFAULT_VERIFICATION_GAS_LIMIT_R1_PRECOMPILE = BigInt(150_000);
 export const DEFAULT_CALL_GAS_LIMIT = BigInt(1_000_000);

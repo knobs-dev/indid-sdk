@@ -7,7 +7,7 @@ import { IndidAddress } from "./address";
  * Version of the account implementation
  * Different versions have different interface requirements and capabilities
  */
-export type AccountVersion = "v1" | "v2";
+export type AccountVersion = 1 | 2;
 
 // Account interfaces
 const V1_ACCOUNT_INTERFACE = new ethers.Interface([
@@ -73,7 +73,7 @@ export class IndidAccount {
     this.factoryAddress = config.factoryAddress || "";
     
     // Set the correct interface based on version
-    this.accountInterface = config.version === "v1" ? V1_ACCOUNT_INTERFACE : V2_ACCOUNT_INTERFACE;
+    this.accountInterface = config.version === 1 ? V1_ACCOUNT_INTERFACE : V2_ACCOUNT_INTERFACE;
   }
 
   /**
@@ -86,7 +86,7 @@ export class IndidAccount {
       return false;
     }
     const code = await provider.getCode(this.address);
-    return code !== "0x";
+    return code === "0x";
   }
 
   /**
@@ -112,9 +112,9 @@ export class IndidAccount {
     // Use provided nonce or generate random one using ethers
     const actualNonce = nonce !== undefined ? nonce : ethers.toBigInt(ethers.randomBytes(24));
     
-    if (this.version === "v1") {
+    if (this.version === 1) {
       return this.getV1InvokeModuleCalldata(moduleAddress, calldata, actualNonce, deadline, signature);
-    } else if (this.version === "v2") {
+    } else if (this.version === 2) {
       return this.getV2InvokeModuleCalldata(moduleAddress, calldata, actualNonce, deadline, signature);
     }
     

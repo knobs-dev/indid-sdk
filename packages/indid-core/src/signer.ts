@@ -1,7 +1,8 @@
-import { BigNumberish, ethers } from "ethers";
+import { BigNumberish, ethers, getBytes, keccak256 } from "ethers";
 import { ec as EC } from "elliptic";
 import BN from "bn.js";
 import { IndidAddress, SignerKind, SignatureType } from "./address";
+import { Logger } from "./utils";
 
 /**
  * Creates a random secp256k1 signer
@@ -25,7 +26,7 @@ export function createRandomSecp256r1Signer(signerKind: SignerKind = SignerKind.
   const ecCurve = new EC('p256'); // p256 is the same as secp256r1
   const keyPair = ecCurve.genKeyPair();
   const privateKey = `0x${keyPair.getPrivate('hex')}`;
-  
+
   return {
     signer: IndidSigner.fromSecp256r1(privateKey, signerKind),
     privateKey
@@ -37,7 +38,7 @@ export function createRandomSecp256r1Signer(signerKind: SignerKind = SignerKind.
  * It supports both ethers.Wallet/JsonRpcSigner and EC.keypair signers.
  */
 export class IndidSigner {
-  private ethersSigner?: ethers.Wallet | ethers.JsonRpcSigner;
+  public ethersSigner?: ethers.Wallet | ethers.JsonRpcSigner;
   private ecKeypair?: EC.KeyPair;
   private address?: string;
   private curveType: 'secp256k1' | 'secp256r1' = 'secp256k1';
@@ -56,7 +57,7 @@ export class IndidSigner {
   ) {
     this.signerKind = signerKind;
     this.curveType = curveType;
-    
+
     // Case 1: String private key
     if (typeof signer === 'string') {
       const privateKey = signer.startsWith('0x') ? signer : `0x${signer}`;
@@ -65,18 +66,23 @@ export class IndidSigner {
         try {
           // For secp256k1, create an ethers wallet
           this.ethersSigner = new ethers.Wallet(privateKey);
+          this.address = this.ethersSigner.address;
+          Logger.getInstance().debug("address from ethers signer: ", this.address);
         } catch (error: any) {
           throw new Error(`Invalid secp256k1 private key: ${error.message || 'Unknown error'}`);
         }
       } else if (curveType === 'secp256r1') {
         try {
           // For secp256r1, create an EC keypair
-          const ecCurve = new EC('p256'); // p256 is the same as secp256r1
-          this.ecKeypair = ecCurve.keyFromPrivate(privateKey.slice(2), 'hex');
+          const privateKeyHex = privateKey.startsWith('0x') 
+            ? privateKey.slice(2) 
+            : privateKey;
+          this.ecKeypair = new EC('p256').keyFromPrivate(privateKeyHex, 'hex');
 
           // Compute the Ethereum address from the public key
           const pubKey = this.ecKeypair.getPublic();
           this.address = IndidAddress.formatFullPublicKeyWith0xPrefix(pubKey);
+          Logger.getInstance().debug("address from ecKeypair: ", this.address);
         } catch (error: any) {
           throw new Error(`Invalid secp256r1 private key: ${error.message || 'Unknown error'}`);
         }
@@ -89,6 +95,8 @@ export class IndidSigner {
       this.ethersSigner = signer as ethers.Wallet | ethers.JsonRpcSigner;
       // Ensure curve type is set to secp256k1 for Ethers signers
       this.curveType = 'secp256k1';
+      this.address = this.ethersSigner.address;
+      Logger.getInstance().debug("address from ethers signer: ", this.address);
     }
     // Case 3: EC KeyPair
     else {
@@ -153,10 +161,28 @@ export class IndidSigner {
     signerKind: SignerKind = SignerKind.Owner
   ): Promise<string> {
     if (this.ethersSigner) {
-      return this.ethersSigner.signMessage(message);
+      //TODO: clean this up, redundant use of createPrefixedSignature
+      const k1Signature = await this.ethersSigner.signMessage(message);
+      const prefixedSignature = IndidSigner
+        .createPrefixedSignature(signerKind,
+          SignatureType.Secp256k1,
+          this.address!,
+          k1Signature);
+
+      return prefixedSignature;
     } else if (this.ecKeypair) {
 
-      let signature = this.ecKeypair.sign(message);
+      // Create the Ethereum signed message prefix
+      const prefixedMessage = Buffer.concat([
+        Buffer.from('\x19Ethereum Signed Message:\n32', 'ascii'),
+        Buffer.from(getBytes(message))
+      ])
+
+      // Hash the prefixed message
+      const prefixedMessageHash = keccak256(prefixedMessage)
+
+      let signature = this.ecKeypair.sign(prefixedMessageHash.slice(2));
+      // let signature = this.ecKeypair.sign(message);
 
       // Ensure s is in the lower half of the curve order
       const curveN = BigInt(this.ecKeypair.ec.n!.toString());
@@ -182,13 +208,36 @@ export class IndidSigner {
       const cleanSignature = `0x${r}${s}${v}`;
 
       const prefixedSignature = IndidSigner
-        .createPrefixedSignature(signerKind,
-          this.curveType === 'secp256k1' ? SignatureType.Secp256k1 : SignatureType.Secp256r1,
-          this.address!, cleanSignature);
+        .createPrefixedSignature(
+          signerKind,
+          SignatureType.Secp256r1,
+          this.address!,
+          cleanSignature);
 
       return prefixedSignature;
     }
 
+    throw new Error("No signer configured");
+  }
+
+
+  public async createDummySignature(): Promise<string> {
+    const signature = "0x00000000fffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c";
+    if (this.ethersSigner) {
+      return IndidSigner.createPrefixedSignature(
+        SignerKind.Owner,
+        SignatureType.Secp256k1,
+        this.address!,
+        signature
+      );
+    } else if (this.ecKeypair) {
+      return IndidSigner.createPrefixedSignature(
+        SignerKind.Owner,
+        SignatureType.Secp256r1,
+        this.address!,
+        signature
+      );
+    }
     throw new Error("No signer configured");
   }
 
@@ -230,6 +279,7 @@ export class IndidSigner {
     };
 
     const nonce = BigInt(ethers.hexlify(ethers.randomBytes(32)));
+    // const nonce = BigInt(100);
     let message = {
       wallet: wallet,
       data: calldata,
@@ -237,12 +287,15 @@ export class IndidSigner {
       deadline: deadline,
     };
 
+    Logger.getInstance().debug("message: ", message);
+    Logger.getInstance().debug("domain: ", domain);
+
     const signature = await this.signTypedData(domain, types, message, signerKind);
 
     return { signature: signature, nonce: nonce.toString() };
   }
 
-  public async signTypedData(domain: any, types: any, message: any, signerKind: SignerKind ): Promise<string> {
+  public async signTypedData(domain: any, types: any, message: any, signerKind: SignerKind): Promise<string> {
     if (this.ethersSigner) {
       return this.ethersSigner.signTypedData(domain, types, message);
     } else {
@@ -250,7 +303,40 @@ export class IndidSigner {
       const typedDataHash = ethers.TypedDataEncoder.hash(domain, types, message);
       const hashBytes = ethers.getBytes(typedDataHash); // Convert to proper byte array
 
-      return await this.signMessage(hashBytes, signerKind);
+      let signature = this.ecKeypair!.sign(hashBytes);
+
+      // Ensure s is in the lower half of the curve order
+      const curveN = BigInt(this.ecKeypair!.ec.n!.toString());
+      const halfCurveN = curveN / 2n;
+      let sBN = BigInt(`0x${signature.s.toString(16)}`);
+
+      if (sBN > halfCurveN) {
+        sBN = curveN - sBN;
+        // Convert BigNumber to BN
+        signature.s = new BN(sBN.toString(16), 16);
+        // Flip the recovery param
+        signature.recoveryParam = signature.recoveryParam ? 0 : 1;
+      }
+      // Convert to Buffer/Uint8Array first to preserve exact byte lengths
+      const rBuffer = signature.r.toArrayLike(Buffer, 'be', 32);
+      const sBuffer = signature.s.toArrayLike(Buffer, 'be', 32);
+
+      // Convert to hex strings, preserving all bytes including leading zeros
+      const r = rBuffer.toString('hex');
+      const s = sBuffer.toString('hex');
+      const v = (signature.recoveryParam ?? 0).toString(16).padStart(2, '0');
+
+      const cleanSignature = `0x${r}${s}${v}`;
+
+      const prefixedSignature = IndidSigner
+        .createPrefixedSignature(
+          signerKind,
+          SignatureType.Secp256r1,
+          this.address!,
+          cleanSignature);
+
+      return prefixedSignature;
+
     }
   }
 
@@ -273,6 +359,7 @@ export class IndidSigner {
     const ownerKind = kind === SignerKind.Owner ? 0 : 1;
     const sigType = signatureType === SignatureType.Secp256k1 ? 0 : 1;
     const firstByte = (ownerKind << 7) | sigType;
+    Logger.getInstance().debug("firstByte: ", firstByte);
 
     let signerHash: string;
     // Create the signerHash (32 bytes with 1 byte prefix)
@@ -284,8 +371,9 @@ export class IndidSigner {
     else {
       throw new Error("util:createPrefixedSignature: Invalid signature type");
     }
-
-
+    Logger.getInstance().debug("signatureType: ", signatureType);
+    Logger.getInstance().debug("signerAddress: ", signerAddress);
+    Logger.getInstance().debug("signerHash: ", signerHash);
     // Combine all parts
     const finalPrefixedSignature = ethers.concat([
       new Uint8Array([firstByte]),
@@ -293,37 +381,10 @@ export class IndidSigner {
       ethers.getBytes(signature)
     ]);
 
+    Logger.getInstance().debug("finalPrefixedSignature: ", ethers.hexlify(finalPrefixedSignature));
+
     return ethers.hexlify(finalPrefixedSignature);
   }
-
-  // public static createPrefixedAddress(signerType: SignatureType, owner: string): string {
-
-  //   let prefixedAddress: Uint8Array;
-  //   let addressBytes: Uint8Array;
-  //   if (signerType == SignatureType.Secp256k1) {
-  //     prefixedAddress = new Uint8Array(21);
-  //     prefixedAddress[0] = 0;
-  //     // Ensure the owner is a valid address
-  //     const cleanOwner = ethers.getAddress(owner);
-
-  //     // Remove the '0x' prefix if present and get the address bytes
-  //     addressBytes = ethers.getBytes(cleanOwner);
-  //   } else if (signerType == SignatureType.Secp256r1) {
-  //     prefixedAddress = new Uint8Array(65);
-  //     prefixedAddress[0] = 1;
-  //     const parsedAddress = owner.slice(2);
-  //     if (parsedAddress.length !== 64 * 2) { //*2 because in hex each byte is 2 characters
-  //       throw new Error("util:createPrefixedAddress: Invalid address length");
-  //     }
-  //     addressBytes = ethers.getBytes(owner);
-  //   } else {
-  //     throw new Error("util:createPrefixedAddress: Invalid signature type");
-  //   }
-  //   // Set the remaining 20 bytes to the address
-  //   prefixedAddress.set(addressBytes, 1);
-
-  //   return ethers.hexlify(prefixedAddress);
-  // }
 
   /**
    * Creates an IndidAddress from this signer
@@ -331,10 +392,10 @@ export class IndidSigner {
    */
   public async getIndidAddress(): Promise<IndidAddress> {
     const address = await this.getAddress();
-    
+
     // Parse the prefixed address to get the raw address and signature type
     const { signerType, address: rawAddress } = IndidAddress.parsePrefixedAddress(address);
-    
+
     // Create and return the IndidAddress
     return new IndidAddress(rawAddress, signerType, this.signerKind);
   }

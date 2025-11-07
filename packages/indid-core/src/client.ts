@@ -30,7 +30,8 @@ import {
   EntryPointMinimalABI,
   IRetrieveSdkDefaultsResponse,
   IDelegatedTransactionOptions,
-  ISendDelegatedTransactionsRequest
+  ISendDelegatedTransactionsRequest,
+  ICreateAccountRequest
 } from "./types";
 import { LogLevel, Logger, OpToJSON } from "./utils";
 import { UserOperationMiddlewareCtx } from "./context";
@@ -52,7 +53,7 @@ import {
 import { ec as EC } from "elliptic";
 import * as crypto from "crypto";
 import { IndidSigner } from "./signer";
-import { IndidAddress, SignerKind } from "./address";
+import { IndidAddress, SignatureType, SignerKind } from "./address";
 import { IndidDeployer } from "./deployer";
 
 /**
@@ -146,7 +147,7 @@ export class Client {
       Logger.getInstance().debug("You are initializing the client without a chainId or rpcUrl");
       instance.entryPointAddress = config.overrideEntryPoint || EntryPointAddress[137];
     }
-
+    //TODO: check if this is useful
     instance.backendCaller.backendUrl =
       config.overrideBackendUrl || "https://api.indid.io";
 
@@ -210,7 +211,7 @@ export class Client {
       to: response.initCode.slice(0, 42),
       data: "0x" + response.initCode.slice(42),
     });
-    
+
     Logger.getInstance().debug("accountAddress from provider.call: ", accountAddress);
     if (accountAddress === "0x") {
       return {
@@ -324,23 +325,10 @@ export class Client {
     else {
       const response = await this.backendCaller.getAccountInfo({ accountAddress: accountAddress, chainId: chainId.toString() });
       Logger.getInstance().debug("response backend caller getAccountInfo: ", response);
-      //TODO: fix this to handle backend returning addresses without prefix
-      // Logger.getInstance().debug("response.owner: ", response.owner);
-      // Logger.getInstance().debug("signer.getAddress(): ", await signer.getAddress());
-      // if (!response.owner?.includes(await signer.getAddress())) {
-      //   Logger.getInstance().error("Signer address is not in the owners array");
-      //   return {
-      //     error: "Signer address is not in the owners array"
-      //   }
-      // }
 
-
-      //TODO: fix this to handle versioning
-        
       const module = new IndidModule(
         response.moduleAddress,
-        // response.moduleType as ModuleType,
-        response.accountVersion as ModuleType,
+        response.moduleType as ModuleType,
         response.storageType as StorageType,
         response.moduleVersion as ModuleVersion
       );
@@ -406,6 +394,7 @@ export class Client {
    * 
    * @param accountAddress - The address of the account to recover
    * @param newOwner - The address of the new owner
+   * @param guardianSigner - The signer for the guardian
    * @param opts - Optional user operation parameters
    * @returns A builder with the partially constructed user operation
    * @throws If provider is not connected, no signer is available, or module type is not enterprise
@@ -413,6 +402,7 @@ export class Client {
   public async prepareEnterpriseRecoveryOperation(
     accountAddress: string,
     newOwner: string,
+    guardianSigner: IndidSigner,
     opts?: IUserOperationOptions
   ): Promise<IUserOperationBuilder> {
     if (!this.provider) {
@@ -421,29 +411,72 @@ export class Client {
     if (this.account.signer === undefined) {
       throw new Error("No signer available, create or connect account first");
     }
-    if (this.account.module.moduleType !== "enterprise") {
+
+    const response = await this.backendCaller.getAccountInfo({ accountAddress: accountAddress, chainId: this.chainId.toString() });
+    Logger.getInstance().debug("response backend caller getAccountInfo: ", response);
+
+    if (response.error) {
+      throw new Error("Error getting account info: " + response.error);
+    }
+
+    if (response.moduleType !== "enterprise") {
       throw new Error("Only enterprise module is supported");
     }
 
-
-    const calldataRecovery = this.account.module.getCalldataTransferOwnership(accountAddress, newOwner);
-
-    const deadline = Date.now() + (opts?.deadlineSeconds || 60 * 60);
-    let { signature, nonce } = await this.account.signer.signEIP712Transaction(
-      accountAddress,
-      this.account.module.address,
-      calldataRecovery,
-      deadline,
-      this.chainId
+    const accountModule = new IndidModule(
+      response.moduleAddress,
+      response.moduleType as ModuleType,
+      response.storageType as StorageType,
+      response.moduleVersion as ModuleVersion
     );
 
-    const builder = await this.prepareSendModuleOperation(
+
+    const calldataRecovery = accountModule.getCalldataTransferOwnership(accountAddress, newOwner);
+
+    Logger.getInstance().debug("calldataRecovery: ", calldataRecovery);
+
+    const currentTimeInSeconds = Math.round(new Date().getTime() / 1000);
+    const deadline = currentTimeInSeconds + (opts?.deadlineSeconds || 60 * 60);
+    let { signature, nonce } = await guardianSigner.signEIP712Transaction(
+      accountAddress,
+      accountModule.address,
+      calldataRecovery,
+      deadline,
+      this.chainId,
+      SignerKind.Guardian
+    );
+
+
+    //This workaround handles signatures for different module versions
+    let prefixedSignature = signature;
+    Logger.getInstance().debug("prefixedSignature before: ", prefixedSignature);
+    Logger.getInstance().debug("guardianSigner.getCurveType(): ", guardianSigner.getCurveType());
+    Logger.getInstance().debug("module version: ", accountModule.version);
+    if (accountModule.version > 1 && guardianSigner.getCurveType() === "secp256k1") {
+      prefixedSignature = IndidSigner
+        .createPrefixedSignature(SignerKind.Guardian,
+          SignatureType.Secp256k1,
+          await guardianSigner.ethersSigner!.getAddress(),
+          signature);
+
+    }
+
+    Logger.getInstance().debug("signature recovery: ", signature);
+
+
+    const calldataExecute = accountModule.getCalldataExecute(
+      accountAddress,
       calldataRecovery,
       nonce,
       deadline,
-      signature,
-      opts
+      [prefixedSignature]
     );
+
+    const builder = await this.prepareSendTransactions([{
+      to: accountModule.address,
+      value: 0,
+      data: calldataExecute
+    }]);
     return builder;
   }
 
@@ -507,51 +540,71 @@ export class Client {
     }
 
     let ownersPrefixedAddresses: string[] = [];
-    let config: ICreateAccountOpts;
-    
+    let config: ICreateAccountRequest;
+
     // Handle case when no options are provided - use defaults from backend
     if (opts == null) {
       const defaultsResponse = await this.backendCaller.retrieveSdkDefaults(this.chainId);
-      Logger.getInstance().debug("defaultsResponse", defaultsResponse
-      );
-      //TODO: fix this work around for guardian prefixed addresses
+      Logger.getInstance().debug("defaultsResponse", defaultsResponse);
       config = {
         factoryAddress: defaultsResponse.factoryAddress,
-        moduleAddress: defaultsResponse._module,
-        guardians: defaultsResponse._guardians.map((g: any) => {
-            const prefix = g.type === 0 ? "0x00" : "0x01";
-            const addressWithoutPrefix = g.value.startsWith("0x") ? g.value.slice(2) : g.value;
-            return IndidAddress.newFromPrefixedAddress(prefix + addressWithoutPrefix);
+        _module: defaultsResponse._module,
+        _guardians: defaultsResponse._guardians.map((g: any) => {
+          const prefix = g.type === 0 ? "0x00" : "0x01";
+          const addressWithoutPrefix = g.value.startsWith("0x") ? g.value.slice(2) : g.value;
+          return prefix + addressWithoutPrefix;
         }),
-        beaconId: defaultsResponse._guardianId,
+        _guardianId: defaultsResponse._guardianId,
         moduleType: defaultsResponse.moduleType,
         storageType: defaultsResponse.storageType
       };
     }
-    // When options are provided, validate they include all necessary parameters
+    // When options are provided with at least some parameters
     else {
-      config = { ...opts };
-      
-      // Validate required common parameters
-      if (!config.factoryAddress || !config.moduleAddress || !config.moduleType || !config.storageType) {
-        return { 
-          initCode: "", 
-          error: "Missing required parameters: factoryAddress, moduleAddress, moduleType, and storageType must be provided" 
+      // Start with defaults from backend if needed
+      if (!opts.factoryAddress || !opts.moduleAddress || !opts.moduleType || !opts.storageType) {
+        const defaultsResponse = await this.backendCaller.retrieveSdkDefaults(this.chainId);
+
+        // Important: Always prioritize guardians from opts if they exist
+        const hasGuardians = opts.guardians && opts.guardians.length > 0;
+        Logger.getInstance().debug("Opts has guardians:", hasGuardians, opts.guardians?.length);
+
+        config = {
+          factoryAddress: opts.factoryAddress || defaultsResponse.factoryAddress,
+          _module: opts.moduleAddress || defaultsResponse._module,
+          moduleType: opts.moduleType || defaultsResponse.moduleType,
+          storageType: opts.storageType || defaultsResponse.storageType,
+          //TODO: beacon id should be the hash of initial guardians and beacon salt
+          //should we use a random beacon salt in the backend?
+          _guardianId: opts.beaconId || defaultsResponse._guardianId,
+          beaconSalt: opts.beaconSalt || "0",
+          // Prioritize guardians from opts if provided
+          // Backend returns object with type and value, we need to convert it to string with prefix
+          _guardians: hasGuardians ? opts.guardians!.map(g => g.getPrefixedAddress()) : defaultsResponse._guardians.map((g: any) => {
+            const prefix = g.type === 0 ? "0x00" : "0x01";
+            const addressWithoutPrefix = g.value.startsWith("0x") ? g.value.slice(2) : g.value;
+            return prefix + addressWithoutPrefix;
+          })
         };
+
+        Logger.getInstance().debug("Final config guardians:", config._guardians);
+      } else {
+        // All required parameters are provided
+        config = { ...opts };
       }
-      
+
       // Validate storage-type specific parameters
-      if (config.storageType === "standard" && (!config.guardians || config.guardians.length === 0)) {
-        return { 
-          initCode: "", 
-          error: "For standard storage type, guardians must be provided" 
+      if (config.storageType === "standard" && (!config._guardians || config._guardians.length === 0)) {
+        return {
+          initCode: "",
+          error: "For standard storage type, guardians must be provided"
         };
       }
-      
-      if (config.storageType === "shared" && !config.beaconId) {
-        return { 
-          initCode: "", 
-          error: "For shared storage type, beaconId must be provided" 
+
+      if (config.storageType === "shared" && !config._guardianId) {
+        return {
+          initCode: "",
+          error: "For shared storage type, beaconId must be provided"
         };
       }
     }
@@ -568,22 +621,33 @@ export class Client {
     let requestData: IInitCodeRequest;
     const storageType = config.storageType;
 
+    // Pack and hash owners using ethers v6 methods
+    const packedOwnersArray = ethers.solidityPacked(
+      ["bytes[]"],
+      [ownersPrefixedAddresses]
+    );
+
+    const ownersHash = ethers.keccak256(packedOwnersArray);
+
     // Build request data based on storage type
     if (storageType === "standard") {
       try {
+
         // Pack and hash guardians using ethers v6 methods
         const packedGuardiansArray = ethers.solidityPacked(
-          ["address[]"],
-          [config.guardians!.map(g => g.getPrefixedAddress())]
+          ["bytes[]"],
+          [config._guardians!]
         );
-        
+
         const guardiansHash = ethers.keccak256(packedGuardiansArray);
-        
+
         requestData = {
-          owner: owners.map(o => o.getPrefixedAddress()), // Using first owner for now
+          owner: owners.map(o => o.getPrefixedAddress()),
+          ownersHash,
           factoryAddress: config.factoryAddress,
+          guardians: config._guardians,
           guardiansHash,
-          moduleAddress: config.moduleAddress,
+          moduleAddress: config._module, 
           salt,
           chainId: this.chainId,
         };
@@ -592,10 +656,14 @@ export class Client {
       }
     } else if (storageType === "shared") {
       requestData = {
-        owner: owners.map(o => o.getPrefixedAddress()), // Using first owner for now
+        owner: owners.map(o => o.getPrefixedAddress()),
+        ownersHash,
         factoryAddress: config.factoryAddress,
-        guardianId: config.beaconId!,
-        moduleAddress: config.moduleAddress,
+        //if beaconSalt is not provided, it will be set to 0
+        beaconSalt: config.beaconSalt || "0",
+        guardians: config._guardians,
+        guardianId: config._guardianId!,
+        moduleAddress: config._module,
         salt,
         chainId: this.chainId,
       };
@@ -625,10 +693,22 @@ export class Client {
     builder: IUserOperationBuilder,
     webhookData?: IWebHookRequest
   ): Promise<ISendUserOpResponse> {
+    const op = builder.getOp();
+    // Convert BigInt values to strings
+    const serializedOp = {
+      ...op,
+      nonce: op.nonce.toString(),
+      callGasLimit: op.callGasLimit.toString(),
+      verificationGasLimit: op.verificationGasLimit.toString(),
+      preVerificationGas: op.preVerificationGas.toString(),
+      maxFeePerGas: op.maxFeePerGas.toString(),
+      maxPriorityFeePerGas: op.maxPriorityFeePerGas.toString()
+    };
+
     const response = await this.backendCaller.sendUserOp({
-      ...builder.getOp(),
+      ...serializedOp,
       webhookData,
-      chainId: this.chainId,
+      chainId: this.chainId.toString(),
     });
 
     return {
@@ -822,117 +902,84 @@ export class Client {
     callData: string,
     opts?: IUserOperationOptions
   ): Promise<UserOperationBuilder> {
-    //TODO: all the gas part should be rewritten to use the native estimateGas from the bundler
     if (!this.provider) {
       throw new Error("Provider has not been connected, please use the connectProvider function");
     }
     let builder = new UserOperationBuilder();
     builder.setSender(this.account.address);
     builder.setCallData(callData);
-    let verificationGasLimit = DEFAULT_VERIFICATION_GAS_LIMIT;
-    let callGasLimit = BigInt(0);
+    // let verificationGasLimit = DEFAULT_VERIFICATION_GAS_LIMIT;
+    // let callGasLimit = BigInt(0);
 
     if (opts?.initCode !== undefined) {
+      Logger.getInstance().debug("initCode inside fillUserOperation: ", opts.initCode);
       builder.setInitCode(opts.initCode);
       builder.setNonce(0);
-      const factoryAddr = dataSlice(opts.initCode, 0, 20);
-      const initCallData = dataSlice(opts.initCode, 20);
-
-      const initEstimate = await this.provider.estimateGas({
-        from: await this.entryPoint.getAddress(),
-        to: factoryAddr,
-        data: initCallData,
-        gasLimit: 10e6,
-      });
-
-      //TODO: why is initEstimate added?
-      verificationGasLimit = verificationGasLimit + initEstimate;
-
-      //GAS: adding a flat 1e6 gas to the callGasLimit because the estimate when using initCode is not always accurate
-      callGasLimit = callGasLimit + BigInt(1e6);
-    } else if (await this.account.isCounterfactual(this.provider)) 
-      { 
-        const initCodeResponse = await this.getInitCode();
-        if (initCodeResponse.error) {
-          throw new Error("Error getting init code: " + initCodeResponse.error);
-        }
-        builder.setInitCode(initCodeResponse.initCode);
-        builder.setNonce(0);
-        
+    } else if (await this.account.isCounterfactual(this.provider)) {
+      const initCodeResponse = await this.getInitCode();
+      if (initCodeResponse.error) {
+        throw new Error("Error getting init code: " + initCodeResponse.error);
       }
-      else {
-        //No init code case
-        let internalNonce;
-        if (opts?.nonceOP !== undefined) {
-          internalNonce = opts.nonceOP;
-        } else {
-          internalNonce = (await this.getNonSequentialAccountNonce()).nonce;
-        }
-        builder.setNonce(internalNonce);
-        Logger.getInstance().debug("nonceSDK inside fillUserOperation", internalNonce);
+      Logger.getInstance().debug("initCodeResponse.initCode inside fillUserOperation: ", initCodeResponse.initCode);
+      builder.setInitCode(initCodeResponse.initCode);
+      builder.setNonce(0);
 
-        //TODO: check this code, is 0x100 the correct address?
-        if (this.account.signer?.getCurveType() === "secp256r1") {
-          if (await this.provider.getCode("0x100") === "0x") {
-            verificationGasLimit = DEFAULT_VERIFICATION_GAS_LIMIT_R1;
-          }
-          else {
-            verificationGasLimit = DEFAULT_VERIFICATION_GAS_LIMIT_R1_PRECOMPILE;
-          }
-        }
-        // else {
-        //   verificationGasLimit = DEFAULT_VERIFICATION_GAS_LIMIT;
-        // }
-        if (opts?.callGasLimit === undefined) {
-          //TODO: get gaslimit from bundler through backend
-          callGasLimit = BigInt(1e6)
-        }
-      }
-
-      if (opts?.callGasLimit) {
-        builder.setCallGasLimit(opts.callGasLimit);
+    }
+    else {
+      //No init code case
+      let internalNonce;
+      if (opts?.nonceOP !== undefined) {
+        internalNonce = opts.nonceOP;
       } else {
-        builder.setCallGasLimit(callGasLimit);
+        internalNonce = (await this.getNonSequentialAccountNonce()).nonce;
       }
-      if (opts?.preVerificationGas) {
-        builder.setPreVerificationGas(opts.preVerificationGas);
-      } else {
-        builder.setPreVerificationGas(DEFAULT_PRE_VERIFICATION_GAS);
-      }
-      if (opts?.verificationGasLimit) {
-        builder.setVerificationGasLimit(opts.verificationGasLimit);
-      } else {
-        builder.setVerificationGasLimit(verificationGasLimit);
-      }
-      if (opts?.maxFeePerGas) {
-        builder.setMaxFeePerGas(opts.maxFeePerGas);
-      } else {
-        if (builder.getMaxFeePerGas() == BigInt(0)) {
-          const block = await this.provider.getBlock("latest");
-          builder.setMaxFeePerGas(
-            block?.baseFeePerGas! + BigInt(builder.getMaxPriorityFeePerGas())
-          );
-        }
-      }
-      if (opts?.maxPriorityFeePerGas) {
-        builder.setMaxPriorityFeePerGas(opts.maxPriorityFeePerGas);
-      }
+      builder.setNonce(internalNonce);
+      Logger.getInstance().debug("nonceSDK inside fillUserOperation", internalNonce);
+    }
 
+    // First set maxFeePerGas and maxPriorityFeePerGas
+    if (opts?.maxFeePerGas) {
+      builder.setMaxFeePerGas(opts.maxFeePerGas);
+    } else {
       if (builder.getMaxFeePerGas() == BigInt(0)) {
         const block = await this.provider.getBlock("latest");
-        Logger.getInstance().debug(
-          "block.baseFeePerGas",
-          Number(block?.baseFeePerGas?.toString() ?? "0")
-        );
-
         Logger.getInstance().debug("maxPriorityFeePerGas", builder.getMaxPriorityFeePerGas());
         builder.setMaxFeePerGas(
           block?.baseFeePerGas! + BigInt(builder.getMaxPriorityFeePerGas())
         );
       }
-
-      return builder;
     }
+    if (opts?.maxPriorityFeePerGas) {
+      builder.setMaxPriorityFeePerGas(opts.maxPriorityFeePerGas);
+    }
+
+    //TODO: handle overrides better
+    //setting a dummy signature to avoid the error from bundler
+    const signature = await this.account.signer.createDummySignature();
+    builder.setSignature(signature);
+    const response = await this.backendCaller.estimateUserOpGas({
+      ...builder.getOp(),
+      chainId: this.chainId.toString(),
+    });
+
+    // Set gas values from backend response
+    builder.setCallGasLimit(BigInt(response.gasEstimate.result.callGasLimit));
+    builder.setVerificationGasLimit(BigInt(response.gasEstimate.result.verificationGasLimit));
+    builder.setPreVerificationGas(BigInt(response.gasEstimate.result.preVerificationGas));
+
+    // Override with provided optional values
+    if (opts?.preVerificationGas) {
+      builder.setPreVerificationGas(opts.preVerificationGas);
+    }
+    if (opts?.verificationGasLimit) {
+      builder.setVerificationGasLimit(opts.verificationGasLimit);
+    }
+    if (opts?.callGasLimit) {
+      builder.setCallGasLimit(opts.callGasLimit);
+    }
+
+    return builder;
+  }
 
   /**
    * Gets the hash of a user operation.
@@ -1182,7 +1229,7 @@ export class Client {
       params.map(async ({ bytecode, salt }) => {
         // Use provided salt or default to "0"
         const finalSalt = salt || "0";
-        
+
         // Calculate the expected deployment address
         const calculatedAddress = await this.provider!.call({
           to: deployerAddress,
