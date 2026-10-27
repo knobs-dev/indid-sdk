@@ -29,7 +29,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20" # Specifies the Node.js version to use.
+          node-version: ">=22.23.4 <23" # Specifies the Node.js version to use.
           # cache: "pnpm" # Caches dependencies using pnpm's caching mechanism.
 
       - name: Install pnpm
@@ -61,7 +61,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ">=22.23.4 <23"
           # cache: "pnpm"
 
       - name: Install pnpm
