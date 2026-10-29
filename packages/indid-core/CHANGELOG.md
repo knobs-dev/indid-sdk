@@ -1,5 +1,16 @@
 # @indid/indid-core-sdk
 
+## 0.3.0
+
+### Minor Changes
+
+- 6c23958: Require Node.js `>=22.23.4 <23` in `engines`, dropping Node 14 and 18 (EOL) and moving to the patched 22.x line from the October 2026 Node security release.
+
+### Patch Changes
+
+- Updated dependencies [6c23958]
+  - @indid/indid-typechains@0.1.0
+
 ## 0.2.1
 
 ### Patch Changes
