@@ -9,7 +9,7 @@
   "license": "MIT",
   "private": false,
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.23.4 <23"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
