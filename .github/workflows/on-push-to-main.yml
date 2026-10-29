@@ -44,6 +44,7 @@ jobs:
           version: pnpm run changeset:version # Uses pnpm to run the version script from Changesets.
           commit: "chore: version package"
           title: "Version Packages" # The title for the pull request created by Changesets.
+          commitMode: github-api
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -79,6 +80,7 @@ jobs:
         uses: changesets/action@v1
         with:
           publish: pnpm run changeset:release
+          commitMode: github-api
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
